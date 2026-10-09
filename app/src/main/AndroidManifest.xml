@@ -78,5 +78,24 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Keeps the wearable linked while Jolt is in the background. -->
+        <service
+            android:name=".ble.WearableConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- Relay pushes arrive as FCM data messages. -->
+        <service
+            android:name=".push.JoltMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="pokes" />
     </application>
 </manifest>

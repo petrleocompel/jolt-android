@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import android.os.Build
 import cz.peelco.jolt.ble.BleLog
@@ -230,7 +231,7 @@ class GattConnection(
         BleLog.debug("Write ${Uuids.short(characteristic)} ← ${data.toHexString()}")
         perform("write ${Uuids.short(characteristic)}", timeout) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                gatt.writeCharacteristic(target, data, androidType) == BluetoothGatt.GATT_SUCCESS
+                gatt.writeCharacteristic(target, data, androidType) == BluetoothStatusCodes.SUCCESS
             } else {
                 @Suppress("DEPRECATION")
                 target.writeType = androidType
@@ -309,7 +310,7 @@ class GattConnection(
             }
         perform("${if (subscribe) "subscribe to" else "unsubscribe from"} ${Uuids.short(characteristic)}", 10.seconds) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                gatt.writeDescriptor(descriptor, value) == BluetoothGatt.GATT_SUCCESS
+                gatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
             } else {
                 @Suppress("DEPRECATION")
                 descriptor.value = value
