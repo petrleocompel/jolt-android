@@ -38,7 +38,13 @@ Pavlok 3; Shock Clock Max connects but cannot fire a stimulus yet (see
 
 Both are signed with the same app-signing key, so either installs over the
 other and updates carry on (version codes are the commit count on `main`, the
-same in both). The GitHub APK is built without Firebase, so it receives no push
+same in both). The signing certificate's SHA-256 fingerprint is
+
+```
+C9:2F:B0:BD:1E:CA:EB:55:D1:54:D9:95:B0:D1:A0:79:F7:96:44:CC:FC:BD:54:44:44:3F:85:05:64:DC:67:1C
+```
+
+and `apksigner verify --print-certs jolt-<version>.apk` shows it. The GitHub APK is built without Firebase, so it receives no push
 notifications: pokes then reach you while Jolt is open, and everything else
 works. Distribution beyond these two is weighed in
 [docs/distribution.md](docs/distribution.md).
