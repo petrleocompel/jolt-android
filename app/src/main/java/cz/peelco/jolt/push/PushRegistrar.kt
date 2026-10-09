@@ -72,7 +72,6 @@ class PushRegistrar(
     private val secrets: SecretStore,
     private val payloadKeys: PayloadKeyStore,
     private val tokenProvider: PushTokenProvider,
-    private val attestor: Attestor,
     private val allowList: RelayAllowList,
     private val relayClient: (baseUrl: String) -> RelayClient,
     private val appId: String,
@@ -227,8 +226,8 @@ class PushRegistrar(
         val client = relayClient(relayUrl)
         val relayToken =
             try {
-                val challenge = client.challenge().challenge
-                val attestation = attestor.attest(challenge, fcmToken, relay.serverId)
+                // No attestation and so no challenge: Android installs
+                // aren't tied to Google Play (protocol C22).
                 val body =
                     buildJsonObject {
                         put("platform", JsonPrimitive("android"))
@@ -236,7 +235,6 @@ class PushRegistrar(
                         put("token", JsonPrimitive(fcmToken))
                         put("appId", JsonPrimitive(appId))
                         put("serverId", JsonPrimitive(relay.serverId))
-                        attestation?.let { put("attestation", it) }
                     }
                 client.registerDevice(body)
             } finally {

@@ -26,7 +26,6 @@ ktor = "3.5.2"
 
 # --- google ---
 firebaseBom = "34.19.0"
-playIntegrity = "1.6.0"
 mlkitBarcode = "17.3.0"
 zxing = "3.5.4"
 
@@ -82,7 +81,6 @@ ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 # --- google ---
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
 firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
-play-integrity = { module = "com.google.android.play:integrity", version.ref = "playIntegrity" }
 
 # --- test ---
 junit = { module = "junit:junit", version.ref = "junit" }

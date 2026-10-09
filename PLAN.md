@@ -101,7 +101,7 @@ in the notes. **OPEN** means not at parity yet.
 | Push transport | APNs direct (`JoltAppDelegate`) and relay (in progress on `feature/push-relay`) | FCM through jolt-relay only | Adapted. jolt-server has no FCM sender; Android always uses the relay. |
 | `GET push/config` | relay branch | `HttpSocialBackend.pushConfig`, `push/PushRegistrar.kt` | Done. `apns` or `none` → the app says the server does not support push for Android; an unknown transport is an error that keeps the current registration (C18). |
 | Relay host allow-list | relay branch | `BuildConfig.RELAY_ALLOWED_HOSTS` | Done. Empty by default. The relay URL is normalised to one trailing slash and may carry a path prefix (C1). |
-| Device registration with attestation (`/v1/challenge`, `/v1/devices`) | relay branch (App Attest) | `push/RelayClient.kt`, `push/Attestation.kt` | Done. Play Integrity standard request with `requestHash` = base64url(SHA-256(client data)) when `PLAY_INTEGRITY_CLOUD_PROJECT` is set, otherwise no attestation (relay runs in `log` mode). Unregistering is `POST /v1/devices/unregister` (C5, C11). |
+| Device registration (`/v1/devices`, `/v1/devices/unregister`) | relay branch (App Attest) | `push/RelayClient.kt` | Adapted. No attestation and no challenge on Android, so installs from GitHub or other stores register like Play installs (C22); iOS keeps App Attest. Unregistering is `POST /v1/devices/unregister` (C5). |
 | `payloadKey` per (device, server), keystore-encrypted | relay branch (keychain) | `push/PayloadKeyStore.kt` | Done. A fresh key per relay token; the previous one opens pushes for 24 hours (C8). |
 | Server registration (`POST/DELETE devices/push-token`, relay shape) | `HTTPSocialBackend.registerPushToken` | `push/PushRegistrar.kt` | Done. A replaced registration is removed on the server and the relay (C7); `410 relay_token_revoked` triggers a fresh relay registration (C6). |
 | Envelope v1 decrypt (AES-256-GCM, AAD, type/serverId checks) | relay branch (NSE) | `push/EnvelopeCrypto.kt` | Done, tested against `envelope-v1.json` and `server-id.json`. |
@@ -155,7 +155,8 @@ in the notes. **OPEN** means not at parity yet.
   `SharedPreferences`: session tokens, the Pavlok token and relay
   `payloadKey`s. `androidx.security:security-crypto` is deprecated, so the
   wrapper is ours and small.
-- Firebase Cloud Messaging for push, Play Integrity for attestation.
+- Firebase Cloud Messaging for push. No Play Integrity: the app is also
+  distributed outside Google Play (protocol C22).
 - CameraX + ML Kit barcode scanning for QR, ZXing core for QR generation.
 
 ### 2.2 Dependency injection
@@ -192,18 +193,15 @@ Async streams (`AsyncStream` + `StreamHub` on iOS) become `StateFlow` and
 3. `transport: relay`:
    1. Check `relay.url` is HTTPS and its host is in `RELAY_ALLOWED_HOSTS`.
    2. Load or create the `payloadKey` for `relay.serverId`.
-   3. `GET /v1/challenge`. Request a Play Integrity token (standard request)
-      with `requestHash = base64url(SHA-256("jolt-relay-v1|<challenge>|<fcmToken>|<serverId>"))`
-      when a cloud project number is configured; otherwise register without
-      attestation.
-   4. `POST /v1/devices` with `platform: android`, `provider: fcm`.
-   5. `POST devices/push-token` on the server with the relay shape.
-   6. Remember (server, serverId, normalised relay URL, FCM token,
+   3. `POST /v1/devices` with `platform: android`, `provider: fcm` and no
+      attestation (C22).
+   4. `POST devices/push-token` on the server with the relay shape.
+   5. Remember (server, serverId, normalised relay URL, FCM token,
       relayToken, kid). An unchanged registration only re-posts its binding
       to the server. A change in any of them registers again and removes the
       old registration on the server and the relay; the previous key keeps
       opening in-flight pushes for 24 hours.
-   7. If the server answers the binding with `410 relay_token_revoked`, drop
+   6. If the server answers the binding with `410 relay_token_revoked`, drop
       that token and its key and start again at step 3.
 4. `transport: apns` or `none`: nothing is registered, and Settings →
    Notifications says the server does not support push for Android.
@@ -231,7 +229,7 @@ passes at each.
 5. **BLE** — GATT queue, legacy controller, Shock Clock Max stub, ESF codec,
    composite and fake repositories, foreground service, tests.
 6. **Push** — envelope crypto with vectors, relay client, push config,
-   registrar, Play Integrity, FCM service, incoming handling, tests.
+   registrar, FCM service, incoming handling, tests.
 7. **Features** — Remote, onboarding, Friends, Settings (server,
    notifications, quick poke, trigger, firing modes, feedback, API tokens),
    Pavlok account, diagnostics.
@@ -250,7 +248,7 @@ passes at each.
 | **Exact alarms** (Android 12+: `SCHEDULE_EXACT_ALARM` user-revocable; 13+: `USE_EXACT_ALARM` for alarm-clock apps). | Phone alarms ring late or not at all. | `setAlarmClock()` with `USE_EXACT_ALARM`; on 12 `SCHEDULE_EXACT_ALARM` and a settings deep link when `canScheduleExactAlarms()` is false. Device alarms on the wearable are unaffected. |
 | **Full-screen intents (Android 14+)** restricted to alarm and calling apps. | Ringing screen does not open over the lock screen. | Declared as an alarm app; when `canUseFullScreenIntent()` is false the app explains and links to the setting; the notification still rings. |
 | **Notification permission (Android 13+)**. | No poke, test or alarm notifications. | Asked in onboarding and from Settings → Notifications, with state shown there. |
-| **Play Integrity** needs a Google Cloud project number and Play distribution. | Sideloaded and CI builds get no verdict. | Optional by config; the relay runs `ATTESTATION_MODE=log` until launch. |
+| **No attestation on Android** (C22). | The relay can't tell a genuine build from a script using the same API. | Rate limits on the relay (C21, section 5) are the abuse control; the app backs off on `429`. |
 | **FCM credentials** (`google-services.json`) are not in the tree. | Build or runtime failure without them. | The Google Services plugin is applied only when the file exists; without it Firebase can be initialised from `FIREBASE_*` Gradle properties; with neither, push is reported as unavailable and everything else works. |
 | **Peripheral identity.** iOS uses a per-phone UUID; Android uses the MAC. | Different persisted shape. | `PairedDeviceRecord.address`; no migration needed for a new app. |
 | **Shock Clock Max opcodes unknown** (also on iOS). | SCMax cannot fire. | Same stub and error message as iOS. |

@@ -36,7 +36,6 @@ android {
 
         buildConfigField("String", "JOLT_DEFAULT_SERVER_URL", setting("JOLT_DEFAULT_SERVER_URL", "https://jolt.example.com/api/v1").quoted())
         buildConfigField("String", "RELAY_ALLOWED_HOSTS", setting("JOLT_RELAY_ALLOWED_HOSTS").quoted())
-        buildConfigField("long", "PLAY_INTEGRITY_CLOUD_PROJECT", "${setting("JOLT_PLAY_INTEGRITY_CLOUD_PROJECT", "0").toLongOrNull() ?: 0L}L")
         // Firebase can also be initialised from these when google-services.json
         // is absent, so a CI job can inject them as plain variables.
         buildConfigField("String", "FIREBASE_PROJECT_ID", setting("JOLT_FIREBASE_PROJECT_ID").quoted())
@@ -148,7 +147,6 @@ dependencies {
     // --- push ---
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
-    implementation(libs.play.integrity)
 
     // --- camera + qr ---
     implementation(libs.camera.core)

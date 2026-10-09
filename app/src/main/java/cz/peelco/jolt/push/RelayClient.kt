@@ -46,12 +46,16 @@ class RelayAllowList(
 
 class RelayException(
     val status: Int,
-    /** The relay's `error` code, such as `unknown_server` or `attestation_failed`. */
+    /** The relay's `error` code, such as `unknown_server` or `rate_limited`. */
     val code: String?,
     message: String,
 ) : Exception(message)
 
-/** The app side of jolt-relay protocol v1 §4: challenge, register, unregister. */
+/**
+ * The app side of jolt-relay protocol v1 §4: register and unregister.
+ * Android never fetches a challenge, which exists only for attestation, and
+ * Android sends none (C22).
+ */
 class RelayClient(
     baseUrl: String,
     engine: HttpClientEngine,
@@ -65,17 +69,9 @@ class RelayClient(
         }
 
     @Serializable
-    data class Challenge(
-        val challenge: String,
-        val expiresAt: String? = null,
-    )
-
-    @Serializable
     private data class Registration(
         val relayToken: String,
     )
-
-    suspend fun challenge(): Challenge = json.decodeFromString(Challenge.serializer(), send(HttpMethod.Get, "v1/challenge"))
 
     /** `POST /v1/devices`; answers the new `relayToken`. */
     suspend fun registerDevice(body: JsonObject): String = json.decodeFromString(Registration.serializer(), send(HttpMethod.Post, "v1/devices", body)).relayToken
@@ -128,7 +124,6 @@ class RelayClient(
             when (code) {
                 "unknown_server" -> "The push relay doesn't know this server yet. Try again in a minute."
                 "server_blocked" -> "The push relay has blocked this server."
-                "attestation_failed" -> "The push relay couldn't verify this copy of Jolt."
                 "app_not_allowed" -> "The push relay doesn't accept this build of Jolt."
                 "registration_closed" -> "The push relay isn't taking new registrations right now."
                 "provider_unavailable" -> "The push relay can't reach Firebase right now. Try again later."

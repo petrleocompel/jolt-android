@@ -44,7 +44,6 @@ class PushRegistrarTest {
 
     private fun TestScope.setUp(
         fcmToken: String? = "fcm-1",
-        attestor: Attestor = Attestor.NONE,
         allowed: String = "relay.example",
     ): Pair<HttpSocialBackend, PushRegistrar> {
         val serverEngine =
@@ -71,7 +70,6 @@ class PushRegistrarTest {
                 val path = request.url.encodedPath.removePrefix("/").removePrefix("jolt/")
                 relay += "${request.method.value} $path" to (request.body as? TextContent)?.text
                 when {
-                    path == "v1/challenge" -> respond("""{"challenge":"Y2hhbGxlbmdl","expiresAt":"2026-10-09T12:00:00Z"}""", HttpStatusCode.OK, json)
                     path == "v1/devices" && request.method == HttpMethod.Post -> respond("""{"relayToken":"rt_${++relayTokens}aaaaaaaa"}""", HttpStatusCode.Created, json)
                     else -> respond("", HttpStatusCode.NoContent)
                 }
@@ -85,7 +83,7 @@ class PushRegistrarTest {
 
                 override suspend fun token() = fcmToken
             }
-        val registrar = PushRegistrar(backend, secrets, keys, tokens, attestor, RelayAllowList.parse(allowed), { RelayClient(it, relayEngine) }, "cz.peelco.jolt", backgroundScope)
+        val registrar = PushRegistrar(backend, secrets, keys, tokens, RelayAllowList.parse(allowed), { RelayClient(it, relayEngine) }, "cz.peelco.jolt", backgroundScope)
         return backend to registrar
     }
 
@@ -104,7 +102,9 @@ class PushRegistrarTest {
             assertThat(registration["token"]!!.jsonPrimitive.content).isEqualTo("fcm-1")
             assertThat(registration["appId"]!!.jsonPrimitive.content).isEqualTo("cz.peelco.jolt")
             assertThat(registration["serverId"]!!.jsonPrimitive.content).isEqualTo(serverId)
+            // Android sends no attestation and so needs no challenge (C22).
             assertThat(registration.containsKey("attestation")).isFalse()
+            assertThat(relay.none { it.first == "GET v1/challenge" }).isTrue()
             assertThat(registration.containsKey("environment")).isFalse()
 
             val binding = body(server.last { it.first == "POST devices/push-token" }.second)
@@ -142,18 +142,6 @@ class PushRegistrarTest {
             assertThat(server.filter { it.first == "DELETE devices/push-token" }.map { it.second }).containsExactly("""{"relayToken":"rt_1aaaaaaaa"}""")
             assertThat(relay.filter { it.first == "POST v1/devices/unregister" }.map { it.second }).contains("""{"relayToken":"rt_1aaaaaaaa"}""")
             assertThat(registrar.payloadKey(serverId, firstKid)).isNotNull()
-        }
-
-    @Test
-    fun attestationIsSentWhenAvailable() =
-        runTest {
-            val attestor = Attestor { challenge, token, server -> buildJsonObject { put("type", JsonPrimitive("play-integrity")); put("challenge", JsonPrimitive(challenge)); put("token", JsonPrimitive("$token@$server")) } }
-            val (backend, registrar) = setUp(attestor = attestor)
-            backend.logIn("b@example.com", "pw")
-            registrar.register()
-            val attestation = body(relay.single { it.first == "POST v1/devices" }.second)["attestation"]!!.jsonObject
-            assertThat(attestation["challenge"]!!.jsonPrimitive.content).isEqualTo("Y2hhbGxlbmdl")
-            assertThat(attestation["token"]!!.jsonPrimitive.content).isEqualTo("fcm-1@$serverId")
         }
 
     @Test

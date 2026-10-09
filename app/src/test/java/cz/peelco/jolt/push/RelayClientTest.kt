@@ -21,7 +21,6 @@ class RelayClientTest {
             MockEngine { request ->
                 seen += "${request.method.value} ${request.url} ${(request.body as? TextContent)?.text.orEmpty()}".trim()
                 when {
-                    request.url.encodedPath.endsWith("v1/challenge") -> respond("""{"challenge":"abc"}""", HttpStatusCode.OK, json)
                     request.url.encodedPath.endsWith("v1/devices") -> respond("""{"error":"app_not_allowed"}""", HttpStatusCode.Forbidden, json)
                     else -> respond("", HttpStatusCode.NoContent)
                 }
@@ -31,16 +30,15 @@ class RelayClientTest {
     @Test
     fun theBaseUrlResolvesWithOrWithoutATrailingSlashAndUnderAPathPrefix() =
         runTest {
-            client("https://relay.example").challenge()
-            client("https://relay.example/").challenge()
-            client("https://push.example/jolt-relay").challenge()
-            client("https://push.example/jolt-relay/").challenge()
-            assertThat(seen)
+            for (base in listOf("https://relay.example", "https://relay.example/", "https://push.example/jolt-relay", "https://push.example/jolt-relay/")) {
+                client(base).unregisterDevice("rt_x")
+            }
+            assertThat(seen.map { it.substringBefore(" {") })
                 .containsExactly(
-                    "GET https://relay.example/v1/challenge",
-                    "GET https://relay.example/v1/challenge",
-                    "GET https://push.example/jolt-relay/v1/challenge",
-                    "GET https://push.example/jolt-relay/v1/challenge",
+                    "POST https://relay.example/v1/devices/unregister",
+                    "POST https://relay.example/v1/devices/unregister",
+                    "POST https://push.example/jolt-relay/v1/devices/unregister",
+                    "POST https://push.example/jolt-relay/v1/devices/unregister",
                 ).inOrder()
             assertThat(RelayClient.normalize(" https://push.example/jolt-relay// ")).isEqualTo("https://push.example/jolt-relay/")
         }

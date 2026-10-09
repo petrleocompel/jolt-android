@@ -54,7 +54,6 @@ command line, an `ORG_GRADLE_PROJECT_<name>` environment variable, or your
 |---|---|---|
 | `JOLT_DEFAULT_SERVER_URL` | `https://jolt.example.com/api/v1` | Server a fresh install points at. Users can change it in **Settings → Server**. |
 | `JOLT_RELAY_ALLOWED_HOSTS` | empty | Comma-separated push relay hosts the app may register with. A server can only send pushes through a relay on this list. |
-| `JOLT_PLAY_INTEGRITY_CLOUD_PROJECT` | `0` | Google Cloud project number for Play Integrity. `0` registers without attestation. |
 | `JOLT_FIREBASE_PROJECT_ID`, `JOLT_FIREBASE_APPLICATION_ID`, `JOLT_FIREBASE_API_KEY`, `JOLT_FIREBASE_SENDER_ID` | empty | Firebase options, used when `app/google-services.json` is absent. |
 
 ### Push notifications

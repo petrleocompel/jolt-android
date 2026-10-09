@@ -30,11 +30,9 @@ import cz.peelco.jolt.features.alarms.AlarmScheduler
 import cz.peelco.jolt.features.shared.PokeFeedbackService
 import cz.peelco.jolt.features.shared.PokeTriggerService
 import cz.peelco.jolt.features.shared.QuickPokeService
-import cz.peelco.jolt.push.Attestor
 import cz.peelco.jolt.push.FirebasePushTokenProvider
 import cz.peelco.jolt.push.IncomingPushHandler
 import cz.peelco.jolt.push.PayloadKeyStore
-import cz.peelco.jolt.push.PlayIntegrityAttestor
 import cz.peelco.jolt.push.PushRegistrar
 import cz.peelco.jolt.push.PushTokenProvider
 import cz.peelco.jolt.push.RelayAllowList
@@ -105,7 +103,6 @@ class AppContainer(
             secrets = secrets,
             payloadKeys = payloadKeys,
             tokenProvider = pushTokenProvider,
-            attestor = if (BuildConfig.PLAY_INTEGRITY_CLOUD_PROJECT > 0) PlayIntegrityAttestor(context, BuildConfig.PLAY_INTEGRITY_CLOUD_PROJECT) else Attestor.NONE,
             allowList = relayAllowList,
             relayClient = { url -> RelayClient(url, httpEngine()) },
             appId = BuildConfig.APPLICATION_ID,
