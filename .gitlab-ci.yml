@@ -1,0 +1,100 @@
+# Private pipeline: checks, a release build and internal distribution.
+#
+# Everything sensitive comes from CI/CD variables, never the tree:
+#
+#   GOOGLE_SERVICES_JSON          file variable: app/google-services.json
+#   ANDROID_KEYSTORE_BASE64       base64 upload keystore
+#   ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#   JOLT_DEFAULT_SERVER_URL       server a fresh install points at
+#   JOLT_RELAY_ALLOWED_HOSTS      comma-separated relay hosts
+#   JOLT_PLAY_INTEGRITY_CLOUD_PROJECT
+#   DISTRIBUTION_URL, DISTRIBUTION_TOKEN   internal distribution endpoint (stub)
+
+image: eclipse-temurin:21-jdk
+
+variables:
+  ANDROID_SDK_ROOT: "$CI_PROJECT_DIR/.android-sdk"
+  ANDROID_HOME: "$CI_PROJECT_DIR/.android-sdk"
+  GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle-home"
+  CMDLINE_TOOLS_VERSION: "13114758"
+  # Build settings reach Gradle as project properties.
+  ORG_GRADLE_PROJECT_JOLT_DEFAULT_SERVER_URL: "$JOLT_DEFAULT_SERVER_URL"
+  ORG_GRADLE_PROJECT_JOLT_RELAY_ALLOWED_HOSTS: "$JOLT_RELAY_ALLOWED_HOSTS"
+  ORG_GRADLE_PROJECT_JOLT_PLAY_INTEGRITY_CLOUD_PROJECT: "$JOLT_PLAY_INTEGRITY_CLOUD_PROJECT"
+
+cache:
+  key: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
+  paths:
+    - .gradle-home/caches/
+    - .gradle-home/wrapper/
+    - .android-sdk/
+
+stages:
+  - check
+  - build
+  - distribute
+
+.android-sdk: &android-sdk
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq unzip curl > /dev/null
+    - |
+      if [ ! -d "$ANDROID_HOME/cmdline-tools/latest" ]; then
+        mkdir -p "$ANDROID_HOME/cmdline-tools"
+        curl -sSL -o /tmp/tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip"
+        unzip -q /tmp/tools.zip -d "$ANDROID_HOME/cmdline-tools"
+        mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+      fi
+    - yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+    - |
+      if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+        cp "$GOOGLE_SERVICES_JSON" app/google-services.json
+      fi
+
+check:
+  <<: *android-sdk
+  stage: check
+  script:
+    - ./gradlew lint test assembleDebug --stacktrace
+  artifacts:
+    when: always
+    paths:
+      - app/build/reports/
+      - app/build/test-results/
+    reports:
+      junit: app/build/test-results/**/TEST-*.xml
+
+build:release:
+  <<: *android-sdk
+  stage: build
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $ANDROID_KEYSTORE_BASE64
+  script:
+    - echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$CI_PROJECT_DIR/upload.jks"
+    - export ANDROID_KEYSTORE_FILE="$CI_PROJECT_DIR/upload.jks"
+    - ./gradlew bundleRelease assembleRelease
+        -Pandroid.injected.version.code="$CI_PIPELINE_IID"
+        -Pandroid.injected.version.name="1.0.$CI_PIPELINE_IID"
+  after_script:
+    - rm -f "$CI_PROJECT_DIR/upload.jks"
+  artifacts:
+    expire_in: 30 days
+    paths:
+      - app/build/outputs/bundle/release/
+      - app/build/outputs/apk/release/
+
+distribute:internal:
+  stage: distribute
+  image: alpine:3
+  needs: ["build:release"]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $DISTRIBUTION_URL
+      when: manual
+  script:
+    # Stub: upload the signed APK to whatever internal distribution is in use
+    # (Firebase App Distribution, a Play internal track uploader, a file
+    # share). Replace this with the real uploader once one is chosen.
+    - apk add --no-cache curl > /dev/null
+    - APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+    - echo "Would upload $APK to internal distribution"
+    - test -n "$DISTRIBUTION_TOKEN" || { echo "DISTRIBUTION_TOKEN not set; skipping upload"; exit 0; }
+    - curl --fail -sS -H "Authorization: Bearer $DISTRIBUTION_TOKEN" -F "file=@$APK" "$DISTRIBUTION_URL"

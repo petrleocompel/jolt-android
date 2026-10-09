@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand green, the iOS AccentColor (#00E676). -->
+    <color name="jolt_green">#FF00E676</color>
+    <color name="launcher_background">#FFFAFAFA</color>
+    <color name="splash_background">#FF000000</color>
+</resources>

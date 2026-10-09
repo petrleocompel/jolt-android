@@ -1,0 +1,15 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+# Firebase and signing material come from CI variables, never the tree.
+app/google-services.json
+*.jks
+*.keystore
+.env
