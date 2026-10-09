@@ -114,7 +114,7 @@ in the notes. **OPEN** means not at parity yet.
 |---|---|---|---|
 | Alarm model, next occurrence, QR code match | `Domain/Models/Alarm.swift`, `DismissChallenge.swift` | `domain/model/Alarm.kt` | Done. |
 | Alarm list / edit / toggle / delete | `Features/Alarms/AlarmsListView.swift`, `AlarmEditView.swift`, `AlarmsViewModel.swift` | `features/alarms/*` | Done. |
-| Storage | SwiftData (`Data/AlarmEntity.swift`, `SwiftDataAlarmRepository.swift`) | JSON in DataStore (`data/store/AlarmStore.kt`) | Adapted. A handful of rows; no Room/KSP needed. |
+| Storage | SwiftData (`Data/AlarmEntity.swift`, `SwiftDataAlarmRepository.swift`) | JSON list in `SharedPreferences` (`data/store/AlarmStore.kt`) | Adapted. A handful of rows; no Room/KSP needed. |
 | Phone alarms | `PhoneAlarmScheduler.swift` (local notifications) | `features/alarms/AlarmScheduler.kt` (`AlarmManager.setAlarmClock`) | Adapted and better than iOS: rings on the alarm stream with a full-screen intent, rescheduled after reboot, time and time-zone change. |
 | Snooze 9 min | `PhoneAlarmScheduler.snooze` | same | Done. |
 | Ringing screen + challenges: math, jumping jacks, QR | `ActiveAlarmView.swift`, `AlarmScreenStyle.swift`, `Challenges/*` | `features/alarms/ActiveAlarmActivity.kt`, `challenges/*` | Done. Jumping jacks use the accelerometer. |
@@ -146,8 +146,10 @@ in the notes. **OPEN** means not at parity yet.
   `JoltAPIClient` is a thin `send(method, path, body)` and Ktor keeps that
   shape, and because `ktor-client-mock` makes the HTTP layer testable without
   a server.
-- DataStore (Preferences) for settings, JSON-encoded where iOS stores a
-  `Codable` blob in `UserDefaults`.
+- `SharedPreferences` for settings, JSON-encoded where iOS stores a
+  `Codable` blob in `UserDefaults`. Synchronous like `UserDefaults`, which the
+  push handler and the stimulus firer rely on; each value is exposed as a
+  `StateFlow`.
 - Android Keystore (AES-256-GCM, non-exportable key) wrapping secrets in
   `SharedPreferences`: session tokens, the Pavlok token and relay
   `payloadKey`s. `androidx.security:security-crypto` is deprecated, so the
