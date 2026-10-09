@@ -20,7 +20,6 @@
     <string name="push_fallback_title">Jolt</string>
     <string name="push_fallback_poke_body">You got a poke. Open Jolt to see it.</string>
     <string name="push_fallback_test_body">Test notification from your Jolt server.</string>
-    <string name="push_poke_title">%1$s</string>
     <string name="push_poke_body">%1$s you — %2$d%% at %3$s</string>
     <string name="push_poke_body_automated">%1$s you — %2$d%% at %3$s (automation)</string>
     <string name="push_test_title">Jolt</string>
@@ -30,5 +29,4 @@
     <string name="alarm_default_title">Jolt Alarm</string>
     <string name="alarm_tap_to_dismiss">Tap to dismiss.</string>
     <string name="alarm_complete_challenge">Complete: %1$s</string>
-    <string name="alarm_action_snooze">Snooze 9 min</string>
 </resources>

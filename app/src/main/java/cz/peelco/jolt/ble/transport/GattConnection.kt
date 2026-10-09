@@ -5,11 +5,13 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattConnectionSettings
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import android.os.Build
+import androidx.annotation.RequiresApi
 import cz.peelco.jolt.ble.BleLog
 import cz.peelco.jolt.ble.Uuids
 import cz.peelco.jolt.domain.model.toHexString
@@ -32,6 +34,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
+import java.util.concurrent.Executors
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -127,6 +130,9 @@ class GattConnection(
 
     val address: String get() = device.address
 
+    /** GATT callbacks run here, off the main thread, as they do on older releases. */
+    private val callbackExecutor = Executors.newSingleThreadExecutor()
+
     // Connection.
 
     /**
@@ -143,7 +149,7 @@ class GattConnection(
         linkState.value = Link.Connecting
         gatt?.close()
         gatt =
-            device.connectGatt(context, autoConnect, callback, BluetoothDevice.TRANSPORT_LE)
+            openGatt(autoConnect)
                 ?: throw BleException.ConnectFailed("Couldn't open a connection to ${device.address}.")
         try {
             if (timeout != null) withTimeout(timeout) { waiter.await() }.getOrThrow() else waiter.await().getOrThrow()
@@ -153,6 +159,27 @@ class GattConnection(
         }
         discoverServices()
     }
+
+    private fun openGatt(autoConnect: Boolean): BluetoothGatt? =
+        if (Build.VERSION.SDK_INT >= ANDROID_17) {
+            openGattWithSettings(autoConnect)
+        } else {
+            @Suppress("DEPRECATION")
+            device.connectGatt(context, autoConnect, callback, BluetoothDevice.TRANSPORT_LE)
+        }
+
+    /** Android 17 replaces the boolean-and-int overloads with a settings object. */
+    @RequiresApi(ANDROID_17)
+    private fun openGattWithSettings(autoConnect: Boolean): BluetoothGatt? =
+        device.connectGatt(
+            BluetoothGattConnectionSettings
+                .Builder()
+                .setAutoConnectEnabled(autoConnect)
+                .setTransport(BluetoothDevice.TRANSPORT_LE)
+                .build(),
+            callbackExecutor,
+            callback,
+        )
 
     private suspend fun discoverServices() {
         val gatt = gatt ?: throw BleException.NotConnected()
@@ -167,6 +194,7 @@ class GattConnection(
             runCatching { it.close() }
         }
         gatt = null
+        callbackExecutor.shutdown()
         failPending(BleException.NotConnected())
         connectWaiter?.complete(Result.failure(BleException.NotConnected()))
         linkState.value = Link.Disconnected(0)
@@ -440,6 +468,8 @@ class GattConnection(
         }
 
     companion object {
+        private const val ANDROID_17 = 37
+
         /**
          * The write type to use, or null when the characteristic allows
          * neither the requested one nor any. An explicit request is honoured

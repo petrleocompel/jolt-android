@@ -25,6 +25,8 @@ import cz.peelco.jolt.data.store.KeyValueStore
 import cz.peelco.jolt.data.store.SharedPreferencesKeyValueStore
 import cz.peelco.jolt.domain.model.ServerConfiguration
 import cz.peelco.jolt.domain.repository.DeviceRepository
+import cz.peelco.jolt.features.alarms.AlarmController
+import cz.peelco.jolt.features.alarms.AlarmScheduler
 import cz.peelco.jolt.features.shared.PokeFeedbackService
 import cz.peelco.jolt.features.shared.PokeTriggerService
 import cz.peelco.jolt.features.shared.QuickPokeService
@@ -71,7 +73,7 @@ class AppContainer(
             CompositeDeviceRepository(context, BleCentral(context), settings, scope)
         }
 
-    val alarms = AlarmStore(keyValues)
+    val alarms = AlarmController(AlarmStore(keyValues), AlarmScheduler(context), deviceRepository)
 
     private val firer = LocalStimulusFirer(deviceRepository, scope) { settings.doNotDisturb.value }
 

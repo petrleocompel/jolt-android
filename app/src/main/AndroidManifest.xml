@@ -79,6 +79,34 @@
             </intent-filter>
         </activity>
 
+        <!-- The ringing alarm, over the lock screen. -->
+        <activity
+            android:name=".features.alarms.ActiveAlarmActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:taskAffinity="cz.peelco.jolt.alarm"
+            android:theme="@style/Theme.Jolt.Alarm"
+            android:turnScreenOn="true"
+            tools:targetApi="o_mr1" />
+
+        <receiver
+            android:name=".features.alarms.AlarmReceiver"
+            android:exported="false" />
+
+        <!-- Re-arms phone alarms after a reboot, an update or a clock change. -->
+        <receiver
+            android:name=".features.alarms.AlarmRescheduleReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Keeps the wearable linked while Jolt is in the background. -->
         <service
             android:name=".ble.WearableConnectionService"

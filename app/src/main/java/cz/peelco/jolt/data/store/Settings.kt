@@ -61,6 +61,9 @@ class AppSettings(
     /** Incoming pokes are logged and acked as muted, never fired. */
     val doNotDisturb = BooleanSetting(store, "cz.peelco.jolt.pokesDoNotDisturb")
 
+    /** Android 13+ asks for notifications once; Settings offers it again. */
+    val notificationPermissionAsked = BooleanSetting(store, "cz.peelco.jolt.notificationPermissionAsked")
+
     /** Keep the wearable linked through a foreground service. Android only. */
     val stayConnectedInBackground = BooleanSetting(store, "cz.peelco.jolt.stayConnected", default = true)
 
