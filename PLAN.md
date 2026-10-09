@@ -10,7 +10,8 @@ Sources of truth:
 
 - iOS behaviour: the `jolt-ios` repository (`main`), read-only from here.
 - Server API: jolt-server `openapi/jolt-v1.yaml`.
-- Push relay: jolt-relay `spec/protocol-v1.md` and `spec/vectors/`. These are
+- Push relay: jolt-relay `spec/protocol-v1.md`, including its section 9
+  clarifications C1–C20 (commit `eb16aae`), and `spec/vectors/`. These are
   normative. Copies of the vectors live in `app/src/test/resources/vectors/`.
 
 ## 1. Parity matrix
@@ -98,15 +99,15 @@ in the notes. **OPEN** means not at parity yet.
 | Feature | iOS files | Android | Status / notes |
 |---|---|---|---|
 | Push transport | APNs direct (`JoltAppDelegate`) and relay (in progress on `feature/push-relay`) | FCM through jolt-relay only | Adapted. jolt-server has no FCM sender; Android always uses the relay. |
-| `GET push/config` | relay branch | `HttpSocialBackend.pushConfig`, `push/PushRegistrar.kt` | Done. `apns` or `none` → the app says the server does not support push for Android. |
-| Relay host allow-list | relay branch | `BuildConfig.RELAY_ALLOWED_HOSTS` | Done. Empty by default. |
-| Device registration with attestation (`/v1/challenge`, `/v1/devices`) | relay branch (App Attest) | `push/RelayClient.kt`, `push/Attestation.kt` | Done. Play Integrity when `PLAY_INTEGRITY_CLOUD_PROJECT` is set, otherwise no attestation (relay runs in `log` mode). |
-| `payloadKey` per (device, server), keystore-encrypted | relay branch (keychain) | `push/PayloadKeyStore.kt` | Done. |
-| Server registration (`POST/DELETE devices/push-token`, relay shape) | `HTTPSocialBackend.registerPushToken` | `push/PushRegistrar.kt` | Done. |
+| `GET push/config` | relay branch | `HttpSocialBackend.pushConfig`, `push/PushRegistrar.kt` | Done. `apns` or `none` → the app says the server does not support push for Android; an unknown transport is an error that keeps the current registration (C18). |
+| Relay host allow-list | relay branch | `BuildConfig.RELAY_ALLOWED_HOSTS` | Done. Empty by default. The relay URL is normalised to one trailing slash and may carry a path prefix (C1). |
+| Device registration with attestation (`/v1/challenge`, `/v1/devices`) | relay branch (App Attest) | `push/RelayClient.kt`, `push/Attestation.kt` | Done. Play Integrity standard request with `requestHash` = base64url(SHA-256(client data)) when `PLAY_INTEGRITY_CLOUD_PROJECT` is set, otherwise no attestation (relay runs in `log` mode). Unregistering is `POST /v1/devices/unregister` (C5, C11). |
+| `payloadKey` per (device, server), keystore-encrypted | relay branch (keychain) | `push/PayloadKeyStore.kt` | Done. A fresh key per relay token; the previous one opens pushes for 24 hours (C8). |
+| Server registration (`POST/DELETE devices/push-token`, relay shape) | `HTTPSocialBackend.registerPushToken` | `push/PushRegistrar.kt` | Done. A replaced registration is removed on the server and the relay (C7); `410 relay_token_revoked` triggers a fresh relay registration (C6). |
 | Envelope v1 decrypt (AES-256-GCM, AAD, type/serverId checks) | relay branch (NSE) | `push/EnvelopeCrypto.kt` | Done, tested against `envelope-v1.json` and `server-id.json`. |
-| Data message → notification + fire + ack | `AppNotificationDelegate`, `JoltAppDelegate` | `push/JoltMessagingService.kt`, `push/IncomingPushHandler.kt` | Adapted. Android draws its own notification and fires from the data message; no alert/silent pair. |
-| Fallback text when decryption fails | APNs `loc-key` | `R.string.push_fallback_*` | Done. |
-| Push diagnostics: devices, test push, polling acks | `Features/Settings/NotificationTest*.swift`, `Domain/Models/PushDiagnostics.swift` | `features/settings/NotificationTestScreen.kt` | Done. Also shows the push config and relay registration state. **OPEN** on the server side: this phone is matched in `GET /devices` by the relay token's last 8 characters, which assumes the server reports that as `tokenSuffix` for relay registrations. |
+| Data message → notification + fire + ack | `AppNotificationDelegate`, `JoltAppDelegate` | `push/JoltMessagingService.kt`, `push/IncomingPushHandler.kt` | Adapted. Android draws its own notification and fires from the data message; no alert/silent pair. Acked with `path: background` (C20); a push without `enc` is dropped (C9). |
+| Fallback text when decryption fails | APNs `loc-key` | `R.string.push_fallback_*` | Done: a localised generic notification, nothing fires (C10). |
+| Push diagnostics: devices, test push, polling acks | `Features/Settings/NotificationTest*.swift`, `Domain/Models/PushDiagnostics.swift` | `features/settings/NotificationTestScreen.kt` | Done. Also shows the push config and relay registration state. This phone is matched in `GET /devices` by the relay token's last 8 characters (C12), and `pushTransport` decides whether the server can deliver (C19). |
 
 ### Alarms
 
@@ -191,23 +192,29 @@ Async streams (`AsyncStream` + `StreamHub` on iOS) become `StateFlow` and
 3. `transport: relay`:
    1. Check `relay.url` is HTTPS and its host is in `RELAY_ALLOWED_HOSTS`.
    2. Load or create the `payloadKey` for `relay.serverId`.
-   3. `GET /v1/challenge`. Request a Play Integrity token with
-      `nonce = base64url(SHA-256("jolt-relay-v1|<challenge>|<fcmToken>|<serverId>"))`
+   3. `GET /v1/challenge`. Request a Play Integrity token (standard request)
+      with `requestHash = base64url(SHA-256("jolt-relay-v1|<challenge>|<fcmToken>|<serverId>"))`
       when a cloud project number is configured; otherwise register without
       attestation.
    4. `POST /v1/devices` with `platform: android`, `provider: fcm`.
    5. `POST devices/push-token` on the server with the relay shape.
-   6. Remember (server, serverId, FCM token, relayToken, kid) so an unchanged
-      registration is not repeated on every launch.
+   6. Remember (server, serverId, normalised relay URL, FCM token,
+      relayToken, kid). An unchanged registration only re-posts its binding
+      to the server. A change in any of them registers again and removes the
+      old registration on the server and the relay; the previous key keeps
+      opening in-flight pushes for 24 hours.
+   7. If the server answers the binding with `410 relay_token_revoked`, drop
+      that token and its key and start again at step 3.
 4. `transport: apns` or `none`: nothing is registered, and Settings →
    Notifications says the server does not support push for Android.
 5. A data message `{type, srv, enc}` arrives in `JoltMessagingService`. The
    envelope is decrypted with the key for `srv`/`kid`, the inner type and
    `serverId` are checked, and the payload goes to the same handler as on iOS:
-   notification, wrong-addressee check, DND, fire once, ack. A failed
-   decryption shows the fallback text and nothing fires.
-6. Sign-out deletes the registration on the server and the relay, and forgets
-   the key.
+   notification, wrong-addressee check, DND, fire once, ack with
+   `path: background`. A failed decryption shows the fallback text and
+   nothing fires; a push with no envelope at all is dropped.
+6. Sign-out deletes the registration on the server (`DELETE devices/push-token`)
+   and the relay (`POST /v1/devices/unregister`), and forgets the keys.
 
 ## 3. Milestones
 
@@ -257,9 +264,6 @@ passes at each.
 - Screenshot automation, design-reference comparison and website.
 - Battery-optimisation guidance for aggressive OEMs.
 - Release signing and store listing (pipeline stub only).
-- Play Integrity nonce: the relay protocol defines the bound value only for
-  App Attest; the app uses the same string, hashed and base64url-encoded, and
-  this needs confirming with the relay before `ATTESTATION_MODE=enforce`.
 - Instrumented tests on a device: the UI is covered by Robolectric smoke
   tests only; Bluetooth against a real Pavlok and FCM delivery through a real
   relay are untested.
