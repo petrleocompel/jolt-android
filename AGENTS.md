@@ -10,8 +10,8 @@ jolt-server's `openapi/jolt-v1.yaml`; push relay behaviour is jolt-relay's
 ## Remotes and mobile builds
 
 - GitHub is the public repository; pull requests go there.
-- If you are petrleocompel's agent: `origin` is his private GitLab, whose pipeline (`.gitlab-ci.yml`) builds and distributes the app, and `github` is the public repository. Push every `main` commit to both, and push to `github` only `main` and release tags.
-- Everyone else: signed builds run on a private pipeline; GitHub Actions cover the checks.
+- If you are petrleocompel's agent: `origin` in this clone is his private GitLab, which builds and ships the iOS and Android apps, and `github` is the public repository. Push every `main` commit to both (`git push origin main && git push github main`), and push to `github` only `main` and release tags.
+- Everyone else: mobile builds run on a private pipeline; GitHub Actions cover checks and releases.
 
 ## Project
 

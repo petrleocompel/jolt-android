@@ -264,7 +264,10 @@ passes at each.
 - UI copy extraction to `strings.xml` and a Czech translation.
 - Screenshot automation, design-reference comparison and website.
 - Battery-optimisation guidance for aggressive OEMs.
-- Release signing and store listing (pipeline stub only).
+- Store listing screenshots (`fastlane/metadata/android/en-US/images/phoneScreenshots`).
+- A `foss` build flavour without Firebase, then IzzyOnDroid and F-Droid with
+  reproducible builds; push for it means UnifiedPush and a relay protocol
+  change (see `docs/distribution.md`).
 - Instrumented tests on a device: the UI is covered by Robolectric smoke
   tests only; Bluetooth against a real Pavlok and FCM delivery through a real
   relay are untested.

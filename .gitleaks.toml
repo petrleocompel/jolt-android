@@ -1,0 +1,7 @@
+# gitleaks config: the default rules, minus the fixtures they misread.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "The published test key of the relay protocol vectors (copied from jolt-relay spec/vectors)"
+paths = ['''(^|/)app/src/test/resources/vectors/''']

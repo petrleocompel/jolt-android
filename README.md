@@ -155,8 +155,9 @@ app/src/main/java/cz/peelco/jolt/
 ## Contributing
 
 Issues and pull requests are welcome on GitHub; see
-[CONTRIBUTING.md](CONTRIBUTING.md). Signed builds and releases run on the
-maintainer's private CI.
+[CONTRIBUTING.md](CONTRIBUTING.md). Google Play builds are made by the
+maintainer's private CI; contributions go through GitHub pull requests. Report
+security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
