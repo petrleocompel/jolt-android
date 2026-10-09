@@ -1,0 +1,6 @@
+# frozen_string_literal: true
+
+# CI writes the Google Play service-account JSON here from the GOOGLE_MASTER_KEY
+# variable, the convention the other apps in the private group use.
+json_key_file(ENV.fetch("SUPPLY_JSON_KEY", File.expand_path("~/google_play_api_key.json")))
+package_name(ENV.fetch("ANDROID_PACKAGE_NAME", "cz.peelco.jolt"))

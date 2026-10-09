@@ -1,0 +1,114 @@
+# frozen_string_literal: true
+#
+# Release lanes for Jolt (Android).
+#
+# Secrets come from CI variables, never the tree:
+#
+#   KEYSTORE           base64 of the Play upload keystore (GitLab)
+#   KEYSTORE_PASS      its store and key password
+#   KEYSTORE_ALIAS     its key alias
+#   GOOGLE_MASTER_KEY  Google Play service-account JSON, written to
+#                      ~/google_play_api_key.json for the Appfile
+#
+# CI maps the keystore onto the ANDROID_KEYSTORE_* variables that
+# app/build.gradle.kts reads, and sets VERSION_CODE / VERSION_NAME.
+# Without them a local build is version 1 / "1.0.0-local".
+
+default_platform(:android)
+
+# The commit count on main: the same number for the same commit on GitLab,
+# GitHub and in a reproducible rebuild, which a key shared across channels
+# needs (see docs/distribution.md).
+def version_properties
+  {
+    "android.injected.version.code" => ENV.fetch("VERSION_CODE", "1"),
+    "android.injected.version.name" => ENV.fetch("VERSION_NAME", "1.0.0-local")
+  }
+end
+
+def aab_path
+  lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH] ||
+    ENV["AAB_PATH"] ||
+    "app/build/outputs/bundle/release/app-release.aab"
+end
+
+platform :android do
+  desc "Android lint"
+  lane :lint do
+    gradle(task: "lint")
+  end
+
+  desc "JVM unit tests and Robolectric UI smoke tests"
+  lane :test do
+    gradle(task: "test")
+  end
+
+  desc "Debug APK"
+  lane :build_debug do
+    gradle(task: "assemble", build_type: "Debug")
+  end
+
+  desc "Signed release AAB for Google Play"
+  lane :build_release do
+    gradle(task: "bundle", build_type: "Release", properties: version_properties)
+    UI.success("AAB: #{aab_path}")
+  end
+
+  desc "Signed release APK, for GitHub Releases and sideloading"
+  lane :build_release_apk do
+    gradle(task: "assemble", build_type: "Release", properties: version_properties)
+  end
+
+  desc "Upload the AAB to the internal track"
+  lane :internal do
+    upload_to_play_store(
+      track: "internal",
+      aab: aab_path,
+      release_status: "completed",
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: false
+    )
+  end
+
+  desc "Promote the current internal release to production"
+  lane :promote_to_production do
+    upload_to_play_store(
+      track: "internal",
+      track_promote_to: "production",
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: true
+    )
+  end
+
+  desc "Upload the store listing text and images from fastlane/metadata, without a binary"
+  lane :metadata do
+    upload_to_play_store(
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false,
+      skip_upload_changelogs: true
+    )
+  end
+
+  desc "Check the Play upload without publishing anything"
+  lane :validate_play do
+    upload_to_play_store(
+      track: "internal",
+      aab: aab_path,
+      validate_only: true,
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+end

@@ -1,0 +1,20 @@
+Jolt is an independent, open-source companion app for Pavlok wearables (Pavlok 2 and Pavlok 3; Shock Clock Max connects but cannot fire yet). Not affiliated with or endorsed by Pavlok Inc.
+
+Pair your device over Bluetooth and take control:
+• Fire zap, vibration or beep at any intensity and repeat count, with tap, hold or confirm firing per stimulus
+• Read live device status: battery, firmware and connection
+• Configure what the physical buttons do, and poke a friend from one of them
+• Set alarms that live on the device itself, so they fire even when your phone is off, or phone alarms that ring over the lock screen
+• Add a wake-up guarantee: solve a puzzle, do jumping jacks or scan a QR code before an alarm stops
+
+Trade jolts with friends:
+• Add friends by handle, invite code or QR, and set exactly what each of them may send you
+• Cap intensity and set a cooldown per stimulus, and decide whether their scripts may poke you too
+• Pokes arrive as a notification and fire on your wrist wherever you are
+• A Do Not Disturb switch mutes every incoming poke
+
+Controlling your own device needs no account and works fully offline. Friends and pokes run on Jolt Server, which is open source and can be self-hosted; push notifications are end-to-end encrypted on their way through the relay.
+
+Optional: sign in with a Pavlok account to poke your existing Pavlok friends. That uses Pavlok's own cloud service.
+
+Source code: https://github.com/petrleocompel/jolt-android

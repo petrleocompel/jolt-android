@@ -1,0 +1,1 @@
+First Android release: the full Jolt feature set, from Bluetooth control and device alarms to friends, pokes and encrypted push through the Jolt relay.

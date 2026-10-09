@@ -30,6 +30,19 @@ Pavlok 3; Shock Clock Max connects but cannot fire a stimulus yet (see
 
 `PLAN.md` lists every iOS feature and where it lives here.
 
+## Install
+
+- **Google Play**: coming soon.
+- **GitHub Releases**: a signed APK is attached to every `v*` release. Apps
+  such as [Obtainium](https://github.com/ImranR98/Obtainium) can follow them.
+
+Both are signed with the same app-signing key, so either installs over the
+other and updates carry on (version codes are the commit count on `main`, the
+same in both). The GitHub APK is built without Firebase, so it receives no push
+notifications: pokes then reach you while Jolt is open, and everything else
+works. Distribution beyond these two is weighed in
+[docs/distribution.md](docs/distribution.md).
+
 ## Build from source
 
 Requirements: JDK 17 or newer to launch Gradle (the daemon itself runs on JDK
@@ -83,6 +96,29 @@ key in the Android Keystore, scoped to the server that issued it.
 phone and waits for the phone to confirm it, so "Arrived in 1.2s" means it
 genuinely got here. **Settings → API tokens** mints and revokes personal access
 tokens for scripts.
+
+## Releasing
+
+[fastlane](https://fastlane.tools) wraps the release steps (`bundle install`
+first):
+
+```bash
+bundle exec fastlane test                  # unit and UI smoke tests
+bundle exec fastlane build_release         # signed AAB for Google Play
+bundle exec fastlane build_release_apk     # signed APK
+bundle exec fastlane internal              # upload the AAB to the internal track
+bundle exec fastlane promote_to_production # internal → production
+bundle exec fastlane metadata              # store listing from fastlane/metadata
+```
+
+Release builds are signed when `ANDROID_KEYSTORE_FILE`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` are
+set, and take their version from `VERSION_CODE` / `VERSION_NAME`. The store
+listing lives in `fastlane/metadata/android/<locale>/`, the layout Google Play,
+F-Droid and IzzyOnDroid all read.
+
+The maintainer's private pipeline uploads Play builds; GitHub Actions builds
+the release APK when a `v*` tag is pushed.
 
 ## Development
 

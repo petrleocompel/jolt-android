@@ -1,98 +1,237 @@
-# Private pipeline: checks, a release build and internal distribution.
+# Private pipeline for Jolt (Android): checks, signed builds, Google Play.
 #
-# Everything sensitive comes from CI/CD variables, never the tree:
+#   test ──► build ──► internal ──► promote
 #
-#   GOOGLE_SERVICES_JSON          file variable: app/google-services.json
-#   ANDROID_KEYSTORE_BASE64       base64 upload keystore
-#   ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
-#   JOLT_DEFAULT_SERVER_URL       server a fresh install points at
-#   JOLT_RELAY_ALLOWED_HOSTS      comma-separated relay hosts
-#   DISTRIBUTION_URL, DISTRIBUTION_TOKEN   internal distribution endpoint (stub)
+#   merge request  lint + unit tests + debug APK
+#   main           + signed AAB and APK, uploaded to the Play internal track
+#   tag v*.*.*     + signed AAB and APK; promoting internal → production is a
+#                  manual button
+#
+# Secrets are CI/CD variables, never the tree. The signing and Play ones are
+# the group variables the other apps here already use:
+#
+#   KEYSTORE              base64 of the Play upload keystore
+#   KEYSTORE_PASS         its store and key password (one value)
+#   KEYSTORE_ALIAS        its key alias
+#   GOOGLE_MASTER_KEY     Google Play service-account JSON
+#
+# and project variables:
+#
+#   GOOGLE_SERVICES_JSON      Firebase config (file or plain variable); without
+#                             it the app builds and reports push as unavailable
+#   JOLT_DEFAULT_SERVER_URL   server a fresh install points at
+#   JOLT_RELAY_ALLOWED_HOSTS  comma-separated push relay hosts
+#   PLAY_PUBLISHING           set to "enabled" once the app exists in Play
+#                             Console and its first AAB was uploaded by hand
 
-image: eclipse-temurin:21-jdk
+stages:
+  - test
+  - build
+  - internal
+  - promote
 
 variables:
+  LC_ALL: "en_US.UTF-8"
+  LANG: "en_US.UTF-8"
+  # The version code is the commit count, so the clone needs all of history.
+  GIT_DEPTH: "0"
+  GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
   ANDROID_SDK_ROOT: "$CI_PROJECT_DIR/.android-sdk"
   ANDROID_HOME: "$CI_PROJECT_DIR/.android-sdk"
-  GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle-home"
-  CMDLINE_TOOLS_VERSION: "13114758"
+  GRADLE_OPTS: >-
+    -Dorg.gradle.daemon=false
+    -Dorg.gradle.parallel=true
+    -Dorg.gradle.caching=true
+    -Dfile.encoding=UTF-8
+  # Must match gradle/libs.versions.toml; compileSdk 37 isn't preinstalled in
+  # public images, so it is fetched and cached below.
+  ANDROID_PLATFORM: "platforms;android-37.0"
+  ANDROID_BUILD_TOOLS: "build-tools;37.0.0"
+  CMDLINE_TOOLS_URL: "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
   # Build settings reach Gradle as project properties.
   ORG_GRADLE_PROJECT_JOLT_DEFAULT_SERVER_URL: "$JOLT_DEFAULT_SERVER_URL"
   ORG_GRADLE_PROJECT_JOLT_RELAY_ALLOWED_HOSTS: "$JOLT_RELAY_ALLOWED_HOSTS"
 
-cache:
-  key: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
-  paths:
-    - .gradle-home/caches/
-    - .gradle-home/wrapper/
-    - .android-sdk/
-
-stages:
-  - check
-  - build
-  - distribute
-
-.android-sdk: &android-sdk
+# The Gradle daemon wants JDK 21 (gradle/gradle-daemon-jvm.properties), so the
+# job starts from Temurin 21 and installs the SDK itself.
+.android:
+  image: eclipse-temurin:21-jdk-noble
   before_script:
-    - apt-get update -qq && apt-get install -y -qq unzip curl > /dev/null
+    - apt-get update -qq && apt-get install -y -qq unzip curl git > /dev/null
     - |
-      if [ ! -d "$ANDROID_HOME/cmdline-tools/latest" ]; then
-        mkdir -p "$ANDROID_HOME/cmdline-tools"
-        curl -sSL -o /tmp/tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip"
-        unzip -q /tmp/tools.zip -d "$ANDROID_HOME/cmdline-tools"
-        mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+      if [ ! -d "$ANDROID_SDK_ROOT/cmdline-tools/latest" ]; then
+        mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+        curl -sSLo /tmp/tools.zip "$CMDLINE_TOOLS_URL"
+        unzip -q /tmp/tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
+        mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
       fi
-    - yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
-    - |
-      if [ -n "$GOOGLE_SERVICES_JSON" ]; then
-        cp "$GOOGLE_SERVICES_JSON" app/google-services.json
-      fi
+    - export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+    - yes | sdkmanager --licenses > /dev/null 2>&1 || true
+    - sdkmanager "platform-tools" "$ANDROID_PLATFORM" "$ANDROID_BUILD_TOOLS" > /dev/null
+    - echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+    - chmod +x ./gradlew
+  cache:
+    - key: "sdk-37"
+      paths:
+        - .android-sdk/cmdline-tools
+        - .android-sdk/platforms
+        - .android-sdk/build-tools
+        - .android-sdk/platform-tools
+    - key:
+        files:
+          - gradle/libs.versions.toml
+          - gradle/wrapper/gradle-wrapper.properties
+        prefix: gradle
+      paths:
+        - .gradle/wrapper
+        - .gradle/caches
 
-check:
-  <<: *android-sdk
-  stage: check
+# Signing, Firebase and the version, for the release builds.
+.release:
+  extends: .android
+  before_script:
+    - !reference [.android, before_script]
+    - echo "$KEYSTORE" | base64 -d > "$CI_PROJECT_DIR/upload.keystore"
+    - export ANDROID_KEYSTORE_FILE="$CI_PROJECT_DIR/upload.keystore"
+    - export ANDROID_KEYSTORE_PASSWORD="$KEYSTORE_PASS"
+    - export ANDROID_KEY_PASSWORD="$KEYSTORE_PASS"
+    - export ANDROID_KEY_ALIAS="$KEYSTORE_ALIAS"
+    - |
+      if [ -f "$GOOGLE_SERVICES_JSON" ]; then
+        cp "$GOOGLE_SERVICES_JSON" app/google-services.json
+      elif [ -n "$GOOGLE_SERVICES_JSON" ]; then
+        printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+      fi
+    # The commit count is the same for a commit here, on GitHub and in a
+    # reproducible rebuild: the app-signing key is shared across channels, so
+    # their version codes must line up (docs/distribution.md).
+    - export VERSION_CODE="$(git rev-list --count HEAD)"
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        export VERSION_NAME="${CI_COMMIT_TAG#v}"
+      else
+        export VERSION_NAME="1.0.$VERSION_CODE"
+      fi
+    - echo "versionCode=$VERSION_CODE versionName=$VERSION_NAME"
+  after_script:
+    - rm -f "$CI_PROJECT_DIR/upload.keystore" app/google-services.json || true
+
+# ----------------------------------------------------------------------- test
+
+lint:
+  extends: .android
+  stage: test
   script:
-    - ./gradlew lint test assembleDebug --stacktrace
+    - ./gradlew lint
   artifacts:
     when: always
+    expire_in: 1 week
     paths:
       - app/build/reports/
-      - app/build/test-results/
-    reports:
-      junit: app/build/test-results/**/TEST-*.xml
 
-build:release:
-  <<: *android-sdk
-  stage: build
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $ANDROID_KEYSTORE_BASE64
+unit-tests:
+  extends: .android
+  stage: test
   script:
-    - echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$CI_PROJECT_DIR/upload.jks"
-    - export ANDROID_KEYSTORE_FILE="$CI_PROJECT_DIR/upload.jks"
-    - ./gradlew bundleRelease assembleRelease
-        -Pandroid.injected.version.code="$CI_PIPELINE_IID"
-        -Pandroid.injected.version.name="1.0.$CI_PIPELINE_IID"
-  after_script:
-    - rm -f "$CI_PROJECT_DIR/upload.jks"
+    - ./gradlew test
   artifacts:
-    expire_in: 30 days
+    when: always
+    expire_in: 1 week
+    reports:
+      junit: app/build/test-results/testDebugUnitTest/TEST-*.xml
     paths:
-      - app/build/outputs/bundle/release/
-      - app/build/outputs/apk/release/
+      - app/build/reports/tests/
 
-distribute:internal:
-  stage: distribute
-  image: alpine:3
-  needs: ["build:release"]
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $DISTRIBUTION_URL
-      when: manual
+# ---------------------------------------------------------------------- build
+
+assemble-debug:
+  extends: .android
+  stage: build
+  needs: []
   script:
-    # Stub: upload the signed APK to whatever internal distribution is in use
-    # (Firebase App Distribution, a Play internal track uploader, a file
-    # share). Replace this with the real uploader once one is chosen.
-    - apk add --no-cache curl > /dev/null
-    - APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
-    - echo "Would upload $APK to internal distribution"
-    - test -n "$DISTRIBUTION_TOKEN" || { echo "DISTRIBUTION_TOKEN not set; skipping upload"; exit 0; }
-    - curl --fail -sS -H "Authorization: Bearer $DISTRIBUTION_TOKEN" -F "file=@$APK" "$DISTRIBUTION_URL"
+    - ./gradlew assembleDebug
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - app/build/outputs/apk/debug/*.apk
+
+bundle-release:
+  extends: .release
+  stage: build
+  needs: []
+  script:
+    - ./gradlew bundleRelease
+        -Pandroid.injected.version.code=$VERSION_CODE
+        -Pandroid.injected.version.name=$VERSION_NAME
+    # The minified APK too: R8 problems only surface in the release variant.
+    - ./gradlew assembleRelease
+        -Pandroid.injected.version.code=$VERSION_CODE
+        -Pandroid.injected.version.name=$VERSION_NAME
+  artifacts:
+    expire_in: 1 month
+    paths:
+      - app/build/outputs/bundle/release/*.aab
+      - app/build/outputs/apk/release/*.apk
+      - app/build/outputs/mapping/release/mapping.txt
+  rules:
+    - if: $KEYSTORE == null || $KEYSTORE == ""
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+# ------------------------------------------------------------------ internal
+
+.fastlane:
+  image: freeletics/fastlane:2.226.0
+  before_script:
+    - echo "$GOOGLE_MASTER_KEY" > ~/google_play_api_key.json
+    - export AAB_PATH="$CI_PROJECT_DIR/app/build/outputs/bundle/release/app-release.aab"
+  after_script:
+    - rm -f ~/google_play_api_key.json || true
+
+play-internal:
+  extends: .fastlane
+  stage: internal
+  environment:
+    name: play/internal
+  needs: ["bundle-release"]
+  script:
+    - fastlane android internal
+  rules:
+    - if: $PLAY_PUBLISHING != "enabled"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+play-metadata:
+  extends: .fastlane
+  stage: internal
+  needs: []
+  script:
+    - fastlane android metadata
+  rules:
+    - if: $PLAY_PUBLISHING != "enabled"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - fastlane/metadata/**/*
+      when: manual
+      allow_failure: true
+
+# ------------------------------------------------------------------- promote
+
+play-production:
+  extends: .fastlane
+  stage: promote
+  environment:
+    name: play/production
+    url: https://play.google.com/store/apps/details?id=cz.peelco.jolt
+  needs: ["play-internal"]
+  script:
+    - fastlane android promote_to_production
+  rules:
+    - if: $PLAY_PUBLISHING != "enabled"
+      when: never
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: manual
+      allow_failure: false
