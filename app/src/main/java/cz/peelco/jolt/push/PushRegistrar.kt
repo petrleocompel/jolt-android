@@ -1,6 +1,7 @@
 package cz.peelco.jolt.push
 
 import android.util.Log
+import cz.peelco.jolt.data.api.JoltApiException
 import cz.peelco.jolt.data.secure.SecretStore
 import cz.peelco.jolt.data.social.SessionListener
 import cz.peelco.jolt.data.social.SocialBackend
@@ -170,20 +171,28 @@ class PushRegistrar(
             }
         val serverUrl = backend.configuration.value.baseUrl
         val config = backend.pushConfig()
-        val previous = registration
+        var previous = registration
 
+        val transport =
+            config.transport ?: run {
+                // Keep whatever is registered: an unknown answer is no reason
+                // to stop receiving pokes (protocol C18).
+                state.value = PushStatus.Failed("The server asked for push transport \"${config.transportName}\", which this version of Jolt doesn't know.")
+                return
+            }
         val relay = config.relay
-        if (config.transport != PushTransport.RELAY || relay == null) {
+        if (transport != PushTransport.RELAY || relay == null) {
             // The server stopped using the relay (or never did): drop what we had there.
             if (previous != null && previous.serverUrl == serverUrl) {
                 unregister(previous)
                 registration = null
             }
-            state.value = PushStatus.ServerUnsupported(config.transport)
+            state.value = PushStatus.ServerUnsupported(transport)
             return
         }
-        val relayHost = runCatching { URI(relay.url).host }.getOrNull().orEmpty()
-        if (!allowList.allows(relay.url)) {
+        val relayUrl = RelayClient.normalize(relay.url)
+        val relayHost = runCatching { URI(relayUrl).host }.getOrNull().orEmpty()
+        if (!allowList.allows(relayUrl)) {
             state.value = PushStatus.RelayNotAllowed(relayHost.ifEmpty { relay.url })
             return
         }
@@ -191,20 +200,31 @@ class PushRegistrar(
         if (previous != null &&
             previous.serverUrl == serverUrl &&
             previous.serverId == relay.serverId &&
-            previous.relayUrl == relay.url &&
+            RelayClient.normalize(previous.relayUrl) == relayUrl &&
             previous.fcmToken == fcmToken
         ) {
             val key = payloadKeys.find(previous.serverId, previous.kid)
             if (key != null) {
                 // Same registration: only re-assert which account it belongs
                 // to, which is idempotent server-side and cheap.
-                backend.registerRelayPushToken(previous.relayToken, Base64Url.encode(key), previous.kid)
-                state.value = PushStatus.Registered(previous.serverId, relayHost, previous.relayToken.takeLast(8))
-                return
+                try {
+                    backend.registerRelayPushToken(previous.relayToken, Base64Url.encode(key), previous.kid)
+                    state.value = PushStatus.Registered(previous.serverId, relayHost, previous.relayToken.takeLast(8))
+                    return
+                } catch (error: JoltApiException.Server) {
+                    if (error.status != 410 || error.code != RELAY_TOKEN_REVOKED) throw error
+                    // The relay told the server this token is gone (protocol
+                    // C6): it will never be re-enabled, so drop it with its
+                    // key and register afresh below.
+                    Log.i(TAG, "Relay token revoked; registering with the relay again")
+                    payloadKeys.discard(previous.serverId, previous.kid)
+                    registration = null
+                    previous = null
+                }
             }
         }
 
-        val client = relayClient(relay.url)
+        val client = relayClient(relayUrl)
         val relayToken =
             try {
                 val challenge = client.challenge().challenge
@@ -227,14 +247,13 @@ class PushRegistrar(
         val kid = EnvelopeCrypto.kid(key)
         backend.registerRelayPushToken(relayToken, Base64Url.encode(key), kid)
 
-        // Re-registering the same (token, serverId) revokes the old relay
-        // token by itself; anything else left over is revoked here.
-        if (previous != null && previous.relayToken != relayToken && (previous.serverId != relay.serverId || previous.fcmToken != fcmToken)) {
-            // Keep the keys when the server is the same: the new one was just
-            // added beside them.
+        // A new relay token replaces the old registration, which goes on both
+        // sides, or the phone would get every poke twice (protocol C7). The
+        // old key stays for in-flight pushes when the server is the same.
+        if (previous != null && previous.relayToken != relayToken) {
             unregister(previous, forgetKeys = previous.serverId != relay.serverId)
         }
-        registration = Registration(serverUrl, relay.serverId, relay.url, fcmToken, relayToken, kid)
+        registration = Registration(serverUrl, relay.serverId, relayUrl, fcmToken, relayToken, kid)
         state.value = PushStatus.Registered(relay.serverId, relayHost, relayToken.takeLast(8))
     }
 
@@ -244,7 +263,7 @@ class PushRegistrar(
         forgetKeys: Boolean = true,
     ) {
         if (old.serverUrl == backend.configuration.value.baseUrl) runCatching { backend.forgetRelayPushToken(old.relayToken) }
-        val client = relayClient(old.relayUrl)
+        val client = relayClient(RelayClient.normalize(old.relayUrl))
         runCatching { client.unregisterDevice(old.relayToken) }
         client.close()
         if (forgetKeys) payloadKeys.forget(old.serverId)
@@ -253,5 +272,6 @@ class PushRegistrar(
     private companion object {
         const val TAG = "JoltPush"
         const val REGISTRATION_KEY = "relayRegistration"
+        const val RELAY_TOKEN_REVOKED = "relay_token_revoked"
     }
 }

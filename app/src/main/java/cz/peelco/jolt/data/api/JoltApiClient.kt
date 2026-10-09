@@ -29,6 +29,8 @@ sealed class JoltApiException(
     class Server(
         val status: Int,
         message: String,
+        /** The machine-readable `error` code, when the body carries one (`relay_token_revoked`). */
+        val code: String? = null,
     ) : JoltApiException(message)
 
     /** 401: token missing, expired, or issued by a different server. */
@@ -128,7 +130,7 @@ class JoltApiClient(
         return when (val status = response.status.value) {
             in 200..299 -> text
             401 -> throw JoltApiException.Unauthorized()
-            else -> throw JoltApiException.Server(status, errorMessage(text))
+            else -> throw JoltApiException.Server(status, errorMessage(text), errorCode(text))
         }
     }
 
@@ -144,6 +146,10 @@ class JoltApiClient(
                 .getOrNull()
                 ?.takeIf { it.isNotEmpty() }
                 ?: "The server rejected that request."
+
+        /** The `error` code of an error body, if any. */
+        fun errorCode(text: String): String? =
+            runCatching { JoltJson.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.contentOrNull }.getOrNull()
 
         /**
          * Probes a server without credentials. `GET /me` is the cheapest

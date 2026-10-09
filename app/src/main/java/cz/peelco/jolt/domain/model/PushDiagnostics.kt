@@ -50,10 +50,16 @@ data class TestPushStatus(
 /** `GET /push/config`: how this server delivers pushes. */
 @Serializable
 data class PushConfig(
-    val transport: PushTransport,
+    /** Kept as sent, so a transport this build doesn't know is not a decode failure (C18). */
+    @SerialName("transport") val transportName: String,
     val apnsEnvironment: String? = null,
     val relay: RelayInfo? = null,
 ) {
+    constructor(transport: PushTransport, relay: RelayInfo? = null) : this(transport.wireName, null, relay)
+
+    /** Null for a transport this build doesn't know. */
+    val transport: PushTransport? get() = PushTransport.entries.firstOrNull { it.wireName == transportName }
+
     @Serializable
     data class RelayInfo(
         val url: String,
@@ -61,17 +67,15 @@ data class PushConfig(
     )
 }
 
-@Serializable
-enum class PushTransport {
+enum class PushTransport(
+    val wireName: String,
+) {
     /** The server has its own APNs credentials: iOS only. */
-    @SerialName("apns")
-    APNS,
+    APNS("apns"),
 
     /** Pushes go through jolt-relay; the only way to reach Android. */
-    @SerialName("relay")
-    RELAY,
+    RELAY("relay"),
 
     /** Push is not configured on this server. */
-    @SerialName("none")
-    NONE,
+    NONE("none"),
 }

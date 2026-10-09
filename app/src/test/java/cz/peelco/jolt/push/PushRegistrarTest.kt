@@ -36,6 +36,9 @@ class PushRegistrarTest {
     private var pushConfig = """{"transport":"relay","relay":{"url":"https://relay.example/","serverId":"$serverId"}}"""
     private var relayTokens = 0
 
+    /** Relay tokens the server reports as revoked by the relay (C6). */
+    private val revokedTokens = mutableSetOf<String>()
+
     private val secrets = InMemorySecretStore()
     private val keys = PayloadKeyStore(secrets)
 
@@ -53,12 +56,19 @@ class PushRegistrarTest {
                     "push/config" -> respond(pushConfig, HttpStatusCode.OK, json)
                     "friends", "pokes" -> respond("[]", HttpStatusCode.OK, json)
                     "friends/requests" -> respond("""{"incoming":[],"outgoing":[]}""", HttpStatusCode.OK, json)
+                    "devices/push-token" ->
+                        if (request.method == HttpMethod.Post && revokedTokens.any { (request.body as? TextContent)?.text.orEmpty().contains(it) }) {
+                            respond("""{"error":"relay_token_revoked","message":"This relay token was revoked."}""", HttpStatusCode.Gone, json)
+                        } else {
+                            respond("", HttpStatusCode.NoContent)
+                        }
                     else -> respond("", HttpStatusCode.NoContent)
                 }
             }
         val relayEngine =
             MockEngine { request ->
-                val path = request.url.encodedPath.removePrefix("/")
+                // One relay in the tests is mounted under /jolt (C1).
+                val path = request.url.encodedPath.removePrefix("/").removePrefix("jolt/")
                 relay += "${request.method.value} $path" to (request.body as? TextContent)?.text
                 when {
                     path == "v1/challenge" -> respond("""{"challenge":"Y2hhbGxlbmdl","expiresAt":"2026-10-09T12:00:00Z"}""", HttpStatusCode.OK, json)
@@ -128,6 +138,8 @@ class PushRegistrarTest {
             val firstKid = body(server.last { it.first == "POST devices/push-token" }.second)["keyId"]!!.jsonPrimitive.content
             registrar.register(knownToken = "fcm-2")
             assertThat(relay.count { it.first == "POST v1/devices" }).isEqualTo(2)
+            // The old registration goes on both sides (C7).
+            assertThat(server.filter { it.first == "DELETE devices/push-token" }.map { it.second }).containsExactly("""{"relayToken":"rt_1aaaaaaaa"}""")
             assertThat(relay.filter { it.first == "POST v1/devices/unregister" }.map { it.second }).contains("""{"relayToken":"rt_1aaaaaaaa"}""")
             assertThat(registrar.payloadKey(serverId, firstKid)).isNotNull()
         }
@@ -191,5 +203,67 @@ class PushRegistrarTest {
             assertThat(relay.filter { it.first == "POST v1/devices/unregister" }.map { it.second }).contains("""{"relayToken":"rt_1aaaaaaaa"}""")
             assertThat(registrar.payloadKey(serverId, kid)).isNull()
             assertThat(registrar.status.value).isEqualTo(PushStatus.SignedOut)
+        }
+
+    @Test
+    fun aRevokedRelayTokenIsReplacedWithAFreshRegistration() =
+        runTest {
+            val (backend, registrar) = setUp()
+            backend.logIn("b@example.com", "pw")
+            registrar.register()
+            val firstKid = body(server.last { it.first == "POST devices/push-token" }.second)["keyId"]!!.jsonPrimitive.content
+
+            // The relay reported rt_1 unregistered; the server now answers 410 (C6).
+            revokedTokens += "rt_1aaaaaaaa"
+            registrar.register()
+
+            assertThat(relay.count { it.first == "POST v1/devices" }).isEqualTo(2)
+            val binding = body(server.last { it.first == "POST devices/push-token" }.second)
+            assertThat(binding["relayToken"]!!.jsonPrimitive.content).isEqualTo("rt_2aaaaaaaa")
+            assertThat(binding["keyId"]!!.jsonPrimitive.content).isNotEqualTo(firstKid)
+            assertThat(registrar.payloadKey(serverId, firstKid)).isNull()
+            assertThat(registrar.status.value).isEqualTo(PushStatus.Registered(serverId, "relay.example", "2aaaaaaaa".takeLast(8)))
+        }
+
+    @Test
+    fun anUnknownTransportKeepsTheCurrentRegistration() =
+        runTest {
+            val (backend, registrar) = setUp()
+            backend.logIn("b@example.com", "pw")
+            registrar.register()
+            pushConfig = """{"transport":"carrier-pigeon"}"""
+            registrar.register()
+            assertThat(registrar.status.value).isInstanceOf(PushStatus.Failed::class.java)
+            assertThat(server.none { it.first == "DELETE devices/push-token" }).isTrue()
+            assertThat(relay.none { it.first == "POST v1/devices/unregister" }).isTrue()
+
+            // Back to normal: still the same registration, nothing new at the relay (C18).
+            pushConfig = """{"transport":"relay","relay":{"url":"https://relay.example/","serverId":"$serverId"}}"""
+            registrar.register()
+            assertThat(relay.count { it.first == "POST v1/devices" }).isEqualTo(1)
+        }
+
+    @Test
+    fun theRelayUrlIsComparedNormalised() =
+        runTest {
+            val (backend, registrar) = setUp()
+            backend.logIn("b@example.com", "pw")
+            registrar.register()
+            pushConfig = """{"transport":"relay","relay":{"url":"https://relay.example","serverId":"$serverId"}}"""
+            registrar.register()
+            assertThat(relay.count { it.first == "POST v1/devices" }).isEqualTo(1)
+        }
+
+    @Test
+    fun movingToAnotherRelayRegistersThereAndLeavesTheOldOne() =
+        runTest {
+            val (backend, registrar) = setUp(allowed = "relay.example,push.example")
+            backend.logIn("b@example.com", "pw")
+            registrar.register()
+            pushConfig = """{"transport":"relay","relay":{"url":"https://push.example/jolt","serverId":"$serverId"}}"""
+            registrar.register()
+            assertThat(relay.count { it.first == "POST v1/devices" }).isEqualTo(2)
+            assertThat(relay.single { it.first == "POST v1/devices/unregister" }.second).isEqualTo("""{"relayToken":"rt_1aaaaaaaa"}""")
+            assertThat(server.single { it.first == "DELETE devices/push-token" }.second).isEqualTo("""{"relayToken":"rt_1aaaaaaaa"}""")
         }
 }
