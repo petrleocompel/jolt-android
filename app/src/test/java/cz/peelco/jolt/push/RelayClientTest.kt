@@ -10,6 +10,7 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import org.junit.Test
+import java.time.Instant
 
 class RelayClientTest {
     private val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -59,5 +60,29 @@ class RelayClientTest {
             assertThat(error.message).isEqualTo("The push relay doesn't accept this build of Jolt.")
             assertThat(RelayClient.message(503, "provider_unavailable")).contains("Firebase")
             assertThat(RelayClient.message(500, null)).isEqualTo("The push relay answered 500.")
+        }
+
+    @Test
+    fun retryAfterIsReadAsSecondsOrADateWithAMinuteAsTheFallback() {
+        val now = Instant.parse("2026-10-09T12:00:00Z")
+        assertThat(RelayClient.retryAfterSeconds("30", now)).isEqualTo(30)
+        assertThat(RelayClient.retryAfterSeconds("Fri, 09 Oct 2026 12:02:00 GMT", now)).isEqualTo(120)
+        assertThat(RelayClient.retryAfterSeconds(null, now)).isEqualTo(RelayClient.DEFAULT_RETRY_AFTER_SECONDS)
+        assertThat(RelayClient.retryAfterSeconds("soon", now)).isEqualTo(RelayClient.DEFAULT_RETRY_AFTER_SECONDS)
+    }
+
+    @Test
+    fun aRateLimitCarriesItsRetryAfter() =
+        runTest {
+            val client =
+                RelayClient(
+                    "https://relay.example/",
+                    MockEngine {
+                        respond("""{"error":"rate_limited"}""", HttpStatusCode.TooManyRequests, headersOf(HttpHeaders.RetryAfter, "45"))
+                    },
+                )
+            val error = runCatching { client.unregisterDevice("rt_x") }.exceptionOrNull() as RelayException
+            assertThat(error.isRateLimited).isTrue()
+            assertThat(error.retryAfterSeconds).isEqualTo(45)
         }
 }

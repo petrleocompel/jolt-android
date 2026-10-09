@@ -203,6 +203,9 @@ Async streams (`AsyncStream` + `StreamHub` on iOS) become `StateFlow` and
       opening in-flight pushes for 24 hours.
    6. If the server answers the binding with `410 relay_token_revoked`, drop
       that token and its key and start again at step 3.
+   7. If the relay answers `429`, wait at least its `Retry-After`, keep the
+      current registration, and revoke any registration the relay refused to
+      drop once the wait is over (C21).
 4. `transport: apns` or `none`: nothing is registered, and Settings →
    Notifications says the server does not support push for Android.
 5. A data message `{type, srv, enc}` arrives in `JoltMessagingService`. The

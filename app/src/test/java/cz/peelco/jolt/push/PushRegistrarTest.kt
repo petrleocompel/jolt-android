@@ -36,6 +36,11 @@ class PushRegistrarTest {
     private var pushConfig = """{"transport":"relay","relay":{"url":"https://relay.example/","serverId":"$serverId"}}"""
     private var relayTokens = 0
 
+    /** Relay paths answering 429 with this Retry-After, until cleared (C21). */
+    private val rateLimited = mutableMapOf<String, String?>()
+    private var clock = 1_000_000L
+    private val scheduledRetries = mutableListOf<Long>()
+
     /** Relay tokens the server reports as revoked by the relay (C6). */
     private val revokedTokens = mutableSetOf<String>()
 
@@ -70,6 +75,12 @@ class PushRegistrarTest {
                 val path = request.url.encodedPath.removePrefix("/").removePrefix("jolt/")
                 relay += "${request.method.value} $path" to (request.body as? TextContent)?.text
                 when {
+                    path in rateLimited ->
+                        respond(
+                            """{"error":"rate_limited"}""",
+                            HttpStatusCode.TooManyRequests,
+                            rateLimited[path]?.let { headersOf(HttpHeaders.ContentType to listOf("application/json"), HttpHeaders.RetryAfter to listOf(it)) } ?: json,
+                        )
                     path == "v1/devices" && request.method == HttpMethod.Post -> respond("""{"relayToken":"rt_${++relayTokens}aaaaaaaa"}""", HttpStatusCode.Created, json)
                     else -> respond("", HttpStatusCode.NoContent)
                 }
@@ -83,7 +94,7 @@ class PushRegistrarTest {
 
                 override suspend fun token() = fcmToken
             }
-        val registrar = PushRegistrar(backend, secrets, keys, tokens, RelayAllowList.parse(allowed), { RelayClient(it, relayEngine) }, "cz.peelco.jolt", backgroundScope)
+        val registrar = PushRegistrar(backend, secrets, keys, tokens, RelayAllowList.parse(allowed), { RelayClient(it, relayEngine) }, "cz.peelco.jolt", backgroundScope, now = { clock }, scheduleRetry = { scheduledRetries += it })
         return backend to registrar
     }
 
@@ -253,5 +264,60 @@ class PushRegistrarTest {
             assertThat(relay.count { it.first == "POST v1/devices" }).isEqualTo(2)
             assertThat(relay.single { it.first == "POST v1/devices/unregister" }.second).isEqualTo("""{"relayToken":"rt_1aaaaaaaa"}""")
             assertThat(server.single { it.first == "DELETE devices/push-token" }.second).isEqualTo("""{"relayToken":"rt_1aaaaaaaa"}""")
+        }
+
+    @Test
+    fun aRateLimitedRegistrationWaitsAndKeepsTheCurrentOne() =
+        runTest {
+            val (backend, registrar) = setUp()
+            backend.logIn("b@example.com", "pw")
+            registrar.register()
+
+            // A new FCM token, but the relay says wait two minutes (C21).
+            rateLimited["v1/devices"] = "120"
+            registrar.register(knownToken = "fcm-2")
+            assertThat(registrar.status.value).isEqualTo(PushStatus.RateLimited(clock + 120_000))
+            assertThat(scheduledRetries).containsExactly(120_000L)
+            // The registration in place stays: nothing unregistered anywhere.
+            assertThat(server.none { it.first == "DELETE devices/push-token" }).isTrue()
+            assertThat(relay.none { it.first == "POST v1/devices/unregister" }).isTrue()
+
+            // Before the time is up the relay isn't asked at all.
+            rateLimited.clear()
+            val before = relay.size
+            clock += 119_000
+            registrar.register(knownToken = "fcm-2")
+            assertThat(relay.size).isEqualTo(before)
+            assertThat(registrar.status.value).isInstanceOf(PushStatus.RateLimited::class.java)
+
+            // After it, the new registration goes through and replaces the old one.
+            clock += 1_000
+            registrar.register(knownToken = "fcm-2")
+            assertThat(registrar.status.value).isEqualTo(PushStatus.Registered(serverId, "relay.example", "2aaaaaaaa".takeLast(8)))
+            assertThat(relay.filter { it.first == "POST v1/devices/unregister" }.map { it.second }).containsExactly("""{"relayToken":"rt_1aaaaaaaa"}""")
+        }
+
+    @Test
+    fun aRateLimitedUnregisterIsRetriedLater() =
+        runTest {
+            val (backend, registrar) = setUp()
+            backend.sessionListener = registrar
+            backend.logIn("b@example.com", "pw")
+            registrar.register()
+
+            rateLimited["v1/devices/unregister"] = null
+            backend.logOut()
+            // No Retry-After header: wait the default minute.
+            assertThat(scheduledRetries).containsExactly(RelayClient.DEFAULT_RETRY_AFTER_SECONDS * 1000)
+            val attempts = relay.count { it.first == "POST v1/devices/unregister" }
+
+            rateLimited.clear()
+            clock += RelayClient.DEFAULT_RETRY_AFTER_SECONDS * 1000
+            registrar.register()
+            assertThat(relay.count { it.first == "POST v1/devices/unregister" }).isEqualTo(attempts + 1)
+            assertThat(relay.last().second).isEqualTo("""{"relayToken":"rt_1aaaaaaaa"}""")
+            // Once done, it isn't sent again.
+            registrar.register()
+            assertThat(relay.count { it.first == "POST v1/devices/unregister" }).isEqualTo(attempts + 1)
         }
 }

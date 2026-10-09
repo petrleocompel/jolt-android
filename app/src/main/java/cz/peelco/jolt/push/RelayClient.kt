@@ -21,6 +21,10 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.URI
+import java.time.Duration
+import java.time.Instant
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 /**
  * Hosts the app may register push tokens with (protocol §8): a self-hosted
@@ -49,7 +53,11 @@ class RelayException(
     /** The relay's `error` code, such as `unknown_server` or `rate_limited`. */
     val code: String?,
     message: String,
-) : Exception(message)
+    /** For `429`: how long the relay asked to be left alone (protocol C21). */
+    val retryAfterSeconds: Long? = null,
+) : Exception(message) {
+    val isRateLimited: Boolean get() = status == 429
+}
 
 /**
  * The app side of jolt-relay protocol v1 §4: register and unregister.
@@ -105,7 +113,8 @@ class RelayClient(
         val status = response.status.value
         if (status in 200..299) return text
         val code = runCatching { json.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.contentOrNull }.getOrNull()
-        throw RelayException(status, code, message(status, code))
+        val retryAfter = if (status == 429) retryAfterSeconds(response.headers[HttpHeaders.RetryAfter]) else null
+        throw RelayException(status, code, message(status, code), retryAfter)
     }
 
     fun close() = http.close()
@@ -116,6 +125,23 @@ class RelayClient(
          * resolves under any path prefix (protocol C1).
          */
         fun normalize(baseUrl: String): String = baseUrl.trim().trimEnd('/') + "/"
+
+        /** Used when a `429` comes without a usable `Retry-After`. */
+        const val DEFAULT_RETRY_AFTER_SECONDS = 60L
+
+        /**
+         * `Retry-After` in seconds. The relay sends delta-seconds; an HTTP
+         * date is understood too, and anything else falls back to a minute.
+         */
+        fun retryAfterSeconds(
+            header: String?,
+            now: Instant = Instant.now(),
+        ): Long {
+            val value = header?.trim().orEmpty()
+            value.toLongOrNull()?.let { return it.coerceAtLeast(0) }
+            return runCatching { Duration.between(now, ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()).seconds.coerceAtLeast(0) }
+                .getOrDefault(DEFAULT_RETRY_AFTER_SECONDS)
+        }
 
         fun message(
             status: Int,
@@ -128,6 +154,7 @@ class RelayClient(
                 "registration_closed" -> "The push relay isn't taking new registrations right now."
                 "provider_unavailable" -> "The push relay can't reach Firebase right now. Try again later."
                 "invalid_request", "invalid_json" -> "The push relay didn't understand the registration."
+                "rate_limited" -> "The push relay asked Jolt to slow down."
                 else -> "The push relay answered $status."
             }
     }

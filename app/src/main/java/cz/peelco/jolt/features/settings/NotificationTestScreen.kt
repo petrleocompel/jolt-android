@@ -52,6 +52,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /**
  * Settings → Notifications: what Android, FCM, the relay and the server each
@@ -311,7 +314,11 @@ private fun pushDescription(status: PushStatus) =
         is PushStatus.RelayNotAllowed -> "Relay ${status.host} isn't trusted by this build" to MaterialTheme.colorScheme.error
         is PushStatus.Registered -> "Registered" to JoltColors.Success
         is PushStatus.Failed -> status.message to MaterialTheme.colorScheme.error
+        is PushStatus.RateLimited ->
+            "The relay asked Jolt to wait; trying again at ${RETRY_TIME.format(Instant.ofEpochMilli(status.retryAtMillis))}" to JoltColors.Warning
     }
+
+private val RETRY_TIME = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault())
 
 private fun deliveredDetail(ack: TestPushAck): String {
     val path =
