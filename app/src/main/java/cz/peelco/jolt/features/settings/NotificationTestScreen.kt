@@ -243,7 +243,7 @@ fun NotificationTestScreen(onBack: () -> Unit) {
             if (state.isSending) {
                 BusyRow("Sending…")
             } else {
-                FormButton("Send test notification", onClick = viewModel::send)
+                FormButton("Send test notification", enabled = pushState.value != PushStatus.SignedOut, onClick = viewModel::send)
             }
         }
 

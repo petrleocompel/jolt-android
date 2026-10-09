@@ -25,6 +25,8 @@ private val DarkScheme =
         surface = Color(0xFF111111),
         surfaceContainer = Color(0xFF1C1C1E),
         surfaceContainerHigh = Color(0xFF2C2C2E),
+        secondaryContainer = Color(0xFF0B3D24),
+        onSecondaryContainer = JoltColors.Green,
     )
 
 private val LightScheme =
@@ -35,6 +37,14 @@ private val LightScheme =
         onSecondary = Color.White,
         tertiary = JoltColors.Amber,
         error = Color(0xFFD70015),
+        // Neutral, like the iOS grouped list; Material's default tints everything violet.
+        background = Color(0xFFF2F2F7),
+        surface = Color(0xFFF2F2F7),
+        surfaceContainer = Color.White,
+        surfaceContainerHigh = Color(0xFFE5E5EA),
+        surfaceContainerLow = Color(0xFFF7F7FA),
+        secondaryContainer = Color(0xFFCCF5DD),
+        onSecondaryContainer = Color(0xFF00391A),
     )
 
 /**

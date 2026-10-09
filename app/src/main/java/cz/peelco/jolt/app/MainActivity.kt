@@ -7,7 +7,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import cz.peelco.jolt.features.shared.JoltPermissions
 import cz.peelco.jolt.push.PushTapExtras
@@ -25,7 +29,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             CompositionLocalProvider(LocalAppContainer provides container) {
-                JoltTheme { JoltRoot() }
+                JoltTheme {
+                    // Gives every screen the theme's background and content colours.
+                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { JoltRoot() }
+                }
             }
         }
         handleTap(intent)

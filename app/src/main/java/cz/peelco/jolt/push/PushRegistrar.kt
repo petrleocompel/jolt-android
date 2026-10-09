@@ -153,12 +153,13 @@ class PushRegistrar(
         }
 
     private suspend fun registerLocked(knownToken: String?) {
-        if (backend.currentUser.value == null) {
-            state.value = PushStatus.SignedOut
-            return
-        }
+        // A build without Firebase can never register, signed in or not.
         if (!tokenProvider.isAvailable) {
             state.value = PushStatus.Unavailable
+            return
+        }
+        if (backend.currentUser.value == null) {
+            state.value = PushStatus.SignedOut
             return
         }
         state.value = PushStatus.Checking
