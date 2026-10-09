@@ -128,7 +128,7 @@ class PushRegistrarTest {
             val firstKid = body(server.last { it.first == "POST devices/push-token" }.second)["keyId"]!!.jsonPrimitive.content
             registrar.register(knownToken = "fcm-2")
             assertThat(relay.count { it.first == "POST v1/devices" }).isEqualTo(2)
-            assertThat(relay.any { it.first == "DELETE v1/devices/rt_1aaaaaaaa" }).isTrue()
+            assertThat(relay.filter { it.first == "POST v1/devices/unregister" }.map { it.second }).contains("""{"relayToken":"rt_1aaaaaaaa"}""")
             assertThat(registrar.payloadKey(serverId, firstKid)).isNotNull()
         }
 
@@ -188,7 +188,7 @@ class PushRegistrarTest {
             backend.logOut()
             assertThat(server.map { it.first }).contains("DELETE devices/push-token")
             assertThat(body(server.last { it.first == "DELETE devices/push-token" }.second)["relayToken"]!!.jsonPrimitive.content).isEqualTo("rt_1aaaaaaaa")
-            assertThat(relay.map { it.first }).contains("DELETE v1/devices/rt_1aaaaaaaa")
+            assertThat(relay.filter { it.first == "POST v1/devices/unregister" }.map { it.second }).contains("""{"relayToken":"rt_1aaaaaaaa"}""")
             assertThat(registrar.payloadKey(serverId, kid)).isNull()
             assertThat(registrar.status.value).isEqualTo(PushStatus.SignedOut)
         }

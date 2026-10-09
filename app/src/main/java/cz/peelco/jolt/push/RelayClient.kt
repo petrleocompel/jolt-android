@@ -15,6 +15,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -49,12 +51,12 @@ class RelayException(
     message: String,
 ) : Exception(message)
 
-/** The app side of jolt-relay protocol v1 §4: challenge, register, revoke. */
+/** The app side of jolt-relay protocol v1 §4: challenge, register, unregister. */
 class RelayClient(
     baseUrl: String,
     engine: HttpClientEngine,
 ) {
-    private val base = baseUrl.trimEnd('/')
+    private val base = normalize(baseUrl)
     private val json = Json { ignoreUnknownKeys = true }
     private val http =
         HttpClient(engine) {
@@ -78,9 +80,12 @@ class RelayClient(
     /** `POST /v1/devices`; answers the new `relayToken`. */
     suspend fun registerDevice(body: JsonObject): String = json.decodeFromString(Registration.serializer(), send(HttpMethod.Post, "v1/devices", body)).relayToken
 
-    /** `DELETE /v1/devices/{relayToken}`; 204 even for an unknown token. */
-    suspend fun deleteDevice(relayToken: String) {
-        send(HttpMethod.Delete, "v1/devices/$relayToken")
+    /**
+     * `POST /v1/devices/unregister`; 204 even for an unknown token. The token
+     * goes in the body so it stays out of access logs (protocol C5).
+     */
+    suspend fun unregisterDevice(relayToken: String) {
+        send(HttpMethod.Post, "v1/devices/unregister", buildJsonObject { put("relayToken", JsonPrimitive(relayToken)) })
     }
 
     private suspend fun send(
@@ -90,7 +95,7 @@ class RelayClient(
     ): String {
         val response =
             try {
-                http.request("$base/$path") {
+                http.request(base + path) {
                     this.method = method
                     header(HttpHeaders.Accept, "application/json")
                     if (body != null) setBody(TextContent(body.toString(), ContentType.Application.Json))
@@ -110,6 +115,12 @@ class RelayClient(
     fun close() = http.close()
 
     companion object {
+        /**
+         * The relay's base URL with exactly one trailing slash, so `v1/…`
+         * resolves under any path prefix (protocol C1).
+         */
+        fun normalize(baseUrl: String): String = baseUrl.trim().trimEnd('/') + "/"
+
         fun message(
             status: Int,
             code: String?,
@@ -118,6 +129,10 @@ class RelayClient(
                 "unknown_server" -> "The push relay doesn't know this server yet. Try again in a minute."
                 "server_blocked" -> "The push relay has blocked this server."
                 "attestation_failed" -> "The push relay couldn't verify this copy of Jolt."
+                "app_not_allowed" -> "The push relay doesn't accept this build of Jolt."
+                "registration_closed" -> "The push relay isn't taking new registrations right now."
+                "provider_unavailable" -> "The push relay can't reach Firebase right now. Try again later."
+                "invalid_request", "invalid_json" -> "The push relay didn't understand the registration."
                 else -> "The push relay answered $status."
             }
     }

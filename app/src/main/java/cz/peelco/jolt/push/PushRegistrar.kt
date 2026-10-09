@@ -245,7 +245,7 @@ class PushRegistrar(
     ) {
         if (old.serverUrl == backend.configuration.value.baseUrl) runCatching { backend.forgetRelayPushToken(old.relayToken) }
         val client = relayClient(old.relayUrl)
-        runCatching { client.deleteDevice(old.relayToken) }
+        runCatching { client.unregisterDevice(old.relayToken) }
         client.close()
         if (forgetKeys) payloadKeys.forget(old.serverId)
     }
