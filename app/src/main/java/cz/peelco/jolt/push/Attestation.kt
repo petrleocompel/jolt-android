@@ -2,7 +2,7 @@ package cz.peelco.jolt.push
 
 import android.content.Context
 import com.google.android.play.core.integrity.IntegrityManagerFactory
-import com.google.android.play.core.integrity.IntegrityTokenRequest
+import com.google.android.play.core.integrity.StandardIntegrityManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.tasks.await
 import kotlinx.serialization.json.JsonObject
@@ -22,22 +22,28 @@ fun interface Attestor {
         val NONE = Attestor { _, _, _ -> null }
 
         /**
-         * The value bound into the attestation:
-         * `base64url(SHA-256("jolt-relay-v1|<challenge>|<token>|<serverId>"))`.
-         * The same string App Attest hashes into its client data; the
-         * protocol doesn't spell out the Play Integrity nonce, so this
-         * mirrors it (see the report to the relay owners).
+         * The client data both platforms bind into attestation (protocol C11):
+         * `jolt-relay-v1|<challenge>|<token>|<serverId>`, with the challenge
+         * exactly as `/v1/challenge` returned it.
          */
-        fun nonce(
+        fun clientData(
             challenge: String,
             token: String,
             serverId: String,
-        ): String = Base64Url.encode(EnvelopeCrypto.sha256("jolt-relay-v1|$challenge|$token|$serverId".toByteArray(Charsets.UTF_8)))
+        ): String = "jolt-relay-v1|$challenge|$token|$serverId"
+
+        /** Play Integrity's `requestHash`: base64url(SHA-256(client data)). */
+        fun requestHash(
+            challenge: String,
+            token: String,
+            serverId: String,
+        ): String = Base64Url.encode(EnvelopeCrypto.sha256(clientData(challenge, token, serverId).toByteArray(Charsets.UTF_8)))
     }
 }
 
 /**
- * Play Integrity (classic request). Optional: the relay runs in `log` mode
+ * Play Integrity, standard request, binding the registration through
+ * `requestHash` (protocol C11). Optional: the relay runs in `log` mode
  * until launch, so a phone without Play Services, a sideloaded build or a
  * missing cloud project number registers without attestation instead of not
  * at all.
@@ -53,13 +59,16 @@ class PlayIntegrityAttestor(
     ): JsonObject? {
         if (cloudProjectNumber <= 0) return null
         return try {
-            val request =
-                IntegrityTokenRequest
-                    .builder()
-                    .setNonce(Attestor.nonce(challenge, token, serverId))
-                    .setCloudProjectNumber(cloudProjectNumber)
-                    .build()
-            val integrityToken = IntegrityManagerFactory.create(context).requestIntegrityToken(request).await().token()
+            val provider =
+                IntegrityManagerFactory
+                    .createStandard(context)
+                    .prepareIntegrityToken(StandardIntegrityManager.PrepareIntegrityTokenRequest.builder().setCloudProjectNumber(cloudProjectNumber).build())
+                    .await()
+            val integrityToken =
+                provider
+                    .request(StandardIntegrityManager.StandardIntegrityTokenRequest.builder().setRequestHash(Attestor.requestHash(challenge, token, serverId)).build())
+                    .await()
+                    .token()
             buildJsonObject {
                 put("type", JsonPrimitive("play-integrity"))
                 put("challenge", JsonPrimitive(challenge))

@@ -22,17 +22,12 @@ open class JoltApplication : Application() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(
             object : DefaultLifecycleObserver {
                 override fun onStart(owner: LifecycleOwner) {
-                    container.setForeground(true)
                     container.keepWearableConnected()
                     // A battery level that moved while backgrounded is
                     // corrected on the first frame.
                     (container.deviceRepository as? CompositeDeviceRepository)?.let { repository ->
                         container.scope.launch { repository.refreshDeviceInfoIfConnected() }
                     }
-                }
-
-                override fun onStop(owner: LifecycleOwner) {
-                    container.setForeground(false)
                 }
             },
         )

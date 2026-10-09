@@ -99,13 +99,7 @@ class NotificationTestViewModel(
         return state.devices.firstOrNull { it.tokenSuffix == suffix }
     }
 
-    fun outcome(state: State): Outcome? {
-        val status = state.status ?: return null
-        status.devices.firstOrNull { !it.isAccepted }?.let { return Outcome.Rejected(it.detail ?: it.reason ?: "unknown") }
-        status.acks.firstOrNull()?.let { return Outcome.Delivered(it) }
-        if (!status.apnsConfigured) return Outcome.NotConfigured
-        return if (state.isWaiting) Outcome.Waiting else Outcome.NoConfirmation
-    }
+    fun outcome(state: State): Outcome? = outcomeOf(state.status, state.isWaiting)
 
     fun refresh() {
         registrar.refresh()
@@ -164,8 +158,23 @@ class NotificationTestViewModel(
         state.update { it.copy(isWaiting = false) }
     }
 
-    private companion object {
-        const val CONFIRMATION_WINDOW_MILLIS = 30_000L
+    companion object {
+        private const val CONFIRMATION_WINDOW_MILLIS = 30_000L
+
+        /** What a test push amounts to so far; null before one was sent. */
+        fun outcomeOf(
+            status: TestPushStatus?,
+            isWaiting: Boolean,
+        ): Outcome? {
+            status ?: return null
+            status.devices.firstOrNull { !it.isAccepted }?.let { return Outcome.Rejected(it.detail ?: it.reason ?: "unknown") }
+            status.acks.firstOrNull()?.let { return Outcome.Delivered(it) }
+            // `pushTransport` is authoritative; `apnsConfigured` only speaks for
+            // servers from before it (protocol C19).
+            val deliverable = status.pushTransport?.let { it != "none" } ?: status.apnsConfigured
+            if (!deliverable) return Outcome.NotConfigured
+            return if (isWaiting) Outcome.Waiting else Outcome.NoConfirmation
+        }
     }
 }
 

@@ -109,6 +109,14 @@ object EnvelopeCrypto {
             val reason: String,
         ) : Decoded
 
+        /**
+         * A poke or test with no envelope. Over a relay registration every
+         * push is encrypted, so this is dropped without a word (protocol C9).
+         */
+        data class Dropped(
+            val kind: String,
+        ) : Decoded
+
         /** Not a relay push at all. */
         data object NotJolt : Decoded
     }
@@ -126,10 +134,11 @@ object EnvelopeCrypto {
         keyFor: (serverId: String, kid: String) -> ByteArray?,
     ): Decoded {
         val kind = data["type"]?.takeIf { it == "poke" || it == "test" } ?: return Decoded.NotJolt
+        val encoded = data["enc"] ?: return Decoded.Dropped(kind)
         val serverId = data["srv"] ?: return Decoded.Unreadable(kind, "missing srv")
         val envelope =
-            data["enc"]?.let { runCatching { json.decodeFromString(Envelope.serializer(), it) }.getOrNull() }
-                ?: return Decoded.Unreadable(kind, "missing or malformed envelope")
+            runCatching { json.decodeFromString(Envelope.serializer(), encoded) }.getOrNull()
+                ?: return Decoded.Unreadable(kind, "malformed envelope")
         val key = keyFor(serverId, envelope.kid) ?: return Decoded.Unreadable(kind, "no payload key for $serverId/${envelope.kid}")
         val plaintext =
             try {

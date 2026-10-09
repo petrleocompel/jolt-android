@@ -41,8 +41,10 @@ data class TestPushStatus(
     @SerialName("testID") val testId: SerialUuid,
     val sentAt: SerialInstant,
     val stimulus: StimulusConfig? = null,
-    /** False when the server can't send pushes and is only logging them. */
+    /** Kept for old app builds; [pushTransport] decides (protocol C19). */
     val apnsConfigured: Boolean = true,
+    /** `apns`, `relay` or `none`: how the server delivered, when it says. */
+    val pushTransport: String? = null,
     val devices: List<TestPushDeviceResult> = emptyList(),
     val acks: List<TestPushAck> = emptyList(),
 )

@@ -132,6 +132,12 @@ class EnvelopeVectorsTest {
     }
 
     @Test
+    fun aPokeWithoutAnEnvelopeIsDroppedNotShown() {
+        assertThat(EnvelopeCrypto.decode(mapOf("type" to "poke", "srv" to "srv_x")) { _, _ -> key }).isEqualTo(EnvelopeCrypto.Decoded.Dropped("poke"))
+        assertThat(EnvelopeCrypto.decode(mapOf("type" to "test")) { _, _ -> key }).isEqualTo(EnvelopeCrypto.Decoded.Dropped("test"))
+    }
+
+    @Test
     fun anythingElseIsNotARelayPush() {
         assertThat(EnvelopeCrypto.decode(mapOf("type" to "chat")) { _, _ -> key }).isEqualTo(EnvelopeCrypto.Decoded.NotJolt)
         assertThat(EnvelopeCrypto.decode(emptyMap()) { _, _ -> key }).isEqualTo(EnvelopeCrypto.Decoded.NotJolt)
@@ -203,9 +209,12 @@ class RelayAllowListTest {
     }
 
     @Test
-    fun theAttestationNonceBindsChallengeTokenAndServer() {
-        val nonce = Attestor.nonce("c", "t", "srv_x")
-        assertThat(nonce).hasLength(43)
-        assertThat(nonce).isNotEqualTo(Attestor.nonce("c", "t2", "srv_x"))
+    fun thePlayIntegrityRequestHashIsBase64UrlOfTheClientDataDigest() {
+        val challenge = "q83vEjRWeJA_challenge"
+        val server = "srv_kzdvvj2umnduyauf35o36k6kw4"
+        assertThat(Attestor.clientData(challenge, "fcm-token", server)).isEqualTo("jolt-relay-v1|$challenge|fcm-token|$server")
+        // Computed independently: base64url(SHA-256(client data)), no padding (C11).
+        assertThat(Attestor.requestHash(challenge, "fcm-token", server)).isEqualTo("DSEmbKbkjxgLka2biQ17s26RhrqtZ8N-aF-i5r8GpKs")
+        assertThat(Attestor.requestHash(challenge, "other-token", server)).isNotEqualTo(Attestor.requestHash(challenge, "fcm-token", server))
     }
 }

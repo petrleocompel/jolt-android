@@ -59,18 +59,20 @@ class IncomingPushHandler(
     private val keyFor: (serverId: String, kid: String) -> ByteArray?,
     private val pokes: PokeRepository,
     private val diagnostics: PushDiagnosticsRepository,
-    private val isAppInForeground: () -> Boolean,
 ) {
     suspend fun handle(data: Map<String, String>) {
         when (val decoded = EnvelopeCrypto.decode(data, keyFor)) {
             EnvelopeCrypto.Decoded.NotJolt -> Unit
+            is EnvelopeCrypto.Decoded.Dropped -> Log.w(TAG, "Dropped a ${decoded.kind} push with no envelope")
             is EnvelopeCrypto.Decoded.Unreadable -> {
                 // Dropped, as the protocol says; only the generic text shows,
                 // and nothing fires.
                 Log.w(TAG, "Dropped an unreadable ${decoded.kind} push: ${decoded.reason}")
                 Notifications.showFallback(context, decoded.kind)
             }
-            is EnvelopeCrypto.Decoded.Push -> deliver(decoded.push, if (isAppInForeground()) TestPushPath.FOREGROUND else TestPushPath.BACKGROUND, notify = true)
+            // A data message is acked as "background" whether or not the
+            // app is open (protocol C20).
+            is EnvelopeCrypto.Decoded.Push -> deliver(decoded.push, TestPushPath.BACKGROUND, notify = true)
         }
     }
 

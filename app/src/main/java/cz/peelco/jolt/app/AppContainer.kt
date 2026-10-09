@@ -44,7 +44,6 @@ import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The composition root, built once by [JoltApplication]; the iOS
@@ -113,18 +112,12 @@ class AppContainer(
             scope = scope,
         )
 
-    private val foreground = AtomicBoolean(false)
-
-    /** Updated by [JoltApplication] from the process lifecycle. */
-    fun setForeground(value: Boolean) = foreground.set(value)
-
     val incomingPushHandler =
         IncomingPushHandler(
             context = context,
             keyFor = pushRegistrar::payloadKey,
             pokes = social,
             diagnostics = social,
-            isAppInForeground = foreground::get,
         )
 
     // Long-lived feature services.
